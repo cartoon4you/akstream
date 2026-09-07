@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import Hls from 'hls.js';
 import {
   Play,
@@ -17,6 +17,9 @@ import {
   Radio,
   ExternalLink,
   SlidersHorizontal,
+  AlertTriangle,
+  Download,
+  VolumeCheck,
 } from 'lucide-react';
 import { ServerOption } from '@/lib/types';
 
@@ -38,7 +41,7 @@ export default function VideoPlayer({
   const hlsRef = useRef<Hls | null>(null);
   const controlsTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Active server
+  // Active server index
   const [selectedServerIndex, setSelectedServerIndex] = useState(0);
   const activeServer = servers[selectedServerIndex] || servers[0];
 
@@ -48,7 +51,11 @@ export default function VideoPlayer({
   const [duration, setDuration] = useState(0);
   const [buffered, setBuffered] = useState(0);
   const [volume, setVolume] = useState(1);
-  const [isMuted, setIsMuted] = useState(false);
+  // Default to MUTED to guarantee compliance with modern Chrome/Safari autoplay policies
+  const [isMuted, setIsMuted] = useState(true);
+  const [mutedAutoplayActive, setMutedAutoplayActive] = useState(true);
+  const [autoplayBlocked, setAutoplayBlocked] = useState(false);
+
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isTheaterMode, setIsTheaterMode] = useState(false);
@@ -58,6 +65,12 @@ export default function VideoPlayer({
   const [isLoading, setIsLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  // Check if current file is MKV (which Chrome cannot play natively in HTML5 video)
+  const isMkvFormat = useMemo(() => {
+    const u = (activeServer?.url || '').toLowerCase();
+    return u.includes('.mkv') || activeServer?.type === 'mkv';
+  }, [activeServer]);
+
   // Compute if proxy should be used: user manual toggle or auto-detected for akwam/downet
   const useProxy = useMemo(() => {
     if (proxyOverride !== null) return proxyOverride;
@@ -65,7 +78,7 @@ export default function VideoPlayer({
     return u.includes('downet.net') || u.includes('akwam') || u.includes('ak.sv');
   }, [proxyOverride, activeServer]);
 
-  // Compute final stream URL (either proxied or direct)
+  // Compute final stream URL (proxied with full Range 206 support or direct)
   const streamUrl = useMemo(() => {
     if (!activeServer) return '';
     if (useProxy) {
@@ -74,6 +87,48 @@ export default function VideoPlayer({
     return activeServer.url;
   }, [activeServer, useProxy]);
 
+  /**
+   * Safe Play Helper:
+   * Handles the Promise returned by HTMLMediaElement.play()
+   * Prevents uncaught DOMException: The play() request was interrupted / NotAllowedError
+   */
+  const safePlay = useCallback(async (videoElement?: HTMLVideoElement | null) => {
+    const el = videoElement || videoRef.current;
+    if (!el) return;
+
+    try {
+      const playPromise = el.play();
+      if (playPromise !== undefined) {
+        await playPromise;
+        setIsPlaying(true);
+        setAutoplayBlocked(false);
+      }
+    } catch (err: any) {
+      console.warn('Playback prevented by browser autoplay policy:', err?.name, err?.message);
+      setIsPlaying(false);
+      if (err?.name === 'NotAllowedError') {
+        setAutoplayBlocked(true);
+      }
+    }
+  }, []);
+
+  // Handle Unmute User Interaction
+  const handleUnmute = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+
+    video.muted = false;
+    video.volume = volume || 0.9;
+    setIsMuted(false);
+    setMutedAutoplayActive(false);
+    setAutoplayBlocked(false);
+
+    // If it was paused or blocked, resume with user gesture
+    if (video.paused) {
+      safePlay(video);
+    }
+  }, [volume, safePlay]);
+
   // Handle HLS or Native MP4 attachment
   useEffect(() => {
     const video = videoRef.current;
@@ -81,12 +136,17 @@ export default function VideoPlayer({
 
     setIsLoading(true);
     setErrorMsg(null);
+    setAutoplayBlocked(false);
 
     // Clean up previous HLS instance
     if (hlsRef.current) {
       hlsRef.current.destroy();
       hlsRef.current = null;
     }
+
+    // Set muted initially to satisfy browser autoplay guidelines
+    video.muted = true;
+    setIsMuted(true);
 
     const isHls = streamUrl.includes('.m3u8') || activeServer?.type === 'hls';
 
@@ -102,41 +162,40 @@ export default function VideoPlayer({
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         setIsLoading(false);
-        if (isPlaying) {
-          video.play().catch(() => {});
-        }
+        safePlay(video);
       });
 
       hls.on(Hls.Events.ERROR, (_event, data) => {
         if (data.fatal) {
           console.warn('HLS Fatal Error:', data.type);
           if (!useProxy) {
-            // Auto switch to proxy to bypass CORS/referer restriction
             setProxyOverride(true);
           } else {
-            setErrorMsg('تعذر تشغيل هذا السيرفر، يرجى تجربة سيرفر آخر من القائمة.');
+            setErrorMsg('تعذر تشغيل هذا السيرفر، يرجى اختيار سيرفر آخر من القائمة.');
           }
         }
       });
     } else {
-      // Native Video (MP4/WebM or Safari Native HLS)
+      // Native Video (MP4 / WebM)
       video.src = streamUrl;
       video.load();
 
       const handleCanPlay = () => {
         setIsLoading(false);
-        if (isPlaying) {
-          video.play().catch(() => {});
-        }
+        // Start playback with muted autoplay
+        safePlay(video);
       };
 
       const handleError = () => {
         if (!useProxy) {
-          // Attempt proxy automatically if direct fails
           setProxyOverride(true);
         } else {
-          setErrorMsg('تعذر تشغيل الرابط المباشر، يمكنك اختيار سيرفر بديل أدناه.');
           setIsLoading(false);
+          if (isMkvFormat) {
+            setErrorMsg('هذا الملف بصيغة MKV غير المدعومة في مشغل المتصفح. يرجى اختيار سيرفر MP4 أو تحميل الملف.');
+          } else {
+            setErrorMsg('تعذر تشغيل الرابط المباشر، يمكنك اختيار سيرفر بديل أو تفعيل البروكسي.');
+          }
         }
       };
 
@@ -155,9 +214,9 @@ export default function VideoPlayer({
         hlsRef.current = null;
       }
     };
-  }, [streamUrl, activeServer]);
+  }, [streamUrl, activeServer, useProxy, isMkvFormat, safePlay]);
 
-  // Seamless Quality / Server switch preserving exact playback position
+  // Seamless Quality Switch preserving exact playback position
   const changeQuality = (index: number) => {
     if (index === selectedServerIndex || !servers[index]) return;
     const video = videoRef.current;
@@ -170,29 +229,27 @@ export default function VideoPlayer({
       onServerChange(servers[index]);
     }
 
-    // Attach one-time listener to restore position as soon as metadata is loaded
     if (video) {
       const onMetadataLoaded = () => {
         try {
           video.currentTime = timeSaved;
           if (wasPlaying) {
-            video.play().catch(() => {});
+            safePlay(video);
           }
-        } catch (e) {
+        } catch {
           // ignore
         }
         video.removeEventListener('loadedmetadata', onMetadataLoaded);
       };
       video.addEventListener('loadedmetadata', onMetadataLoaded);
 
-      // Fallback timer
       setTimeout(() => {
         if (video) {
           if (Math.abs(video.currentTime - timeSaved) > 1) {
             video.currentTime = timeSaved;
           }
           if (wasPlaying && video.paused) {
-            video.play().catch(() => {});
+            safePlay(video);
           }
         }
       }, 250);
@@ -204,23 +261,23 @@ export default function VideoPlayer({
   };
 
   // Video event handlers
-  const togglePlay = () => {
+  const togglePlay = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
+
     if (video.paused) {
-      video.play().then(() => setIsPlaying(true)).catch(() => {});
+      safePlay(video);
     } else {
       video.pause();
       setIsPlaying(false);
     }
-  };
+  }, [safePlay]);
 
   const handleTimeUpdate = () => {
     const video = videoRef.current;
     if (!video) return;
     setCurrentTime(video.currentTime);
 
-    // Calculate buffer
     if (video.buffered.length > 0) {
       const bufferedEnd = video.buffered.end(video.buffered.length - 1);
       setBuffered((bufferedEnd / (video.duration || 1)) * 100);
@@ -247,21 +304,24 @@ export default function VideoPlayer({
     const val = parseFloat(e.target.value);
     setVolume(val);
     video.volume = val;
-    setIsMuted(val === 0);
+    const muted = val === 0;
+    video.muted = muted;
+    setIsMuted(muted);
+    if (!muted) {
+      setMutedAutoplayActive(false);
+    }
   };
 
-  const toggleMute = () => {
+  const toggleMute = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
     if (isMuted) {
-      video.muted = false;
-      video.volume = volume || 0.8;
-      setIsMuted(false);
+      handleUnmute();
     } else {
       video.muted = true;
       setIsMuted(true);
     }
-  };
+  }, [isMuted, handleUnmute]);
 
   const changePlaybackSpeed = (speed: number) => {
     const video = videoRef.current;
@@ -292,7 +352,6 @@ export default function VideoPlayer({
         e.preventDefault();
         togglePlay();
       } else if (e.code === 'ArrowRight') {
-        // Forward 10s (in RTL, ArrowRight can be forward or backward)
         if (videoRef.current) videoRef.current.currentTime += 10;
       } else if (e.code === 'ArrowLeft') {
         if (videoRef.current) videoRef.current.currentTime -= 10;
@@ -305,7 +364,7 @@ export default function VideoPlayer({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isPlaying, isMuted]);
+  }, [togglePlay, toggleMute]);
 
   // Auto-hide controls during mouse inactivity
   const handleMouseMove = () => {
@@ -330,6 +389,11 @@ export default function VideoPlayer({
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
+  // Find alternative MP4 server if MKV is active
+  const mp4ServerIndex = useMemo(() => {
+    return servers.findIndex((s) => !s.url.toLowerCase().includes('.mkv') && s.type !== 'mkv');
+  }, [servers]);
+
   if (!servers || servers.length === 0) {
     return (
       <div className="w-full aspect-video bg-neutral-900 rounded-2xl flex flex-col items-center justify-center text-neutral-500 border border-neutral-800 p-6 text-center">
@@ -341,6 +405,39 @@ export default function VideoPlayer({
 
   return (
     <div className={`space-y-4 ${isTheaterMode ? 'w-full' : 'max-w-6xl mx-auto'}`}>
+      {/* MKV Alert Banner */}
+      {isMkvFormat && (
+        <div className="p-3.5 bg-amber-950/40 border border-amber-500/40 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-amber-200" dir="rtl">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>
+              <strong>تنبيه:</strong> هذا الملف بصيغة MKV غير المدعومة افتراضياً في متصفح Chrome. يرجى التبديل لسيرفر MP4 أو تحميل الملف لتشغيله عبر تطبيق VLC.
+            </span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {mp4ServerIndex !== -1 && (
+              <button
+                type="button"
+                onClick={() => changeQuality(mp4ServerIndex)}
+                className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold transition"
+              >
+                التبديل لسيرفر MP4
+              </button>
+            )}
+            <a
+              href={activeServer.url}
+              download
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-3 py-1.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-white font-semibold transition flex items-center gap-1.5 border border-neutral-700"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>تحميل مباشر</span>
+            </a>
+          </div>
+        </div>
+      )}
+
       {/* Player Container */}
       <div
         ref={containerRef}
@@ -360,6 +457,7 @@ export default function VideoPlayer({
           onPlaying={() => setIsLoading(false)}
           poster={poster}
           playsInline
+          muted={isMuted}
           className="w-full h-full object-contain cursor-pointer"
         />
 
@@ -370,9 +468,40 @@ export default function VideoPlayer({
           </div>
         )}
 
-        {/* Error Notice */}
+        {/* 1. Muted Autoplay Unmute Badge (Modern Chrome/Safari Compliant) */}
+        {mutedAutoplayActive && isPlaying && !autoplayBlocked && (
+          <div className="absolute top-4 left-4 z-30 animate-bounce">
+            <button
+              type="button"
+              onClick={handleUnmute}
+              className="flex items-center gap-2 px-4 py-2 rounded-2xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold shadow-2xl shadow-red-950/80 border border-red-400/40 backdrop-blur-md transition-all active:scale-95"
+            >
+              <VolumeX className="w-4 h-4 text-white" />
+              <span>الصوت مكتوم تلقائياً — انقر لتفعيل الصوت (Unmute)</span>
+            </button>
+          </div>
+        )}
+
+        {/* 2. Autoplay Blocked Fallback Overlay (User Interaction Required) */}
+        {autoplayBlocked && !isPlaying && (
+          <div className="absolute inset-0 z-30 flex flex-col items-center justify-center bg-black/80 backdrop-blur-sm p-6 text-center">
+            <button
+              type="button"
+              onClick={handleUnmute}
+              className="w-20 h-20 rounded-full bg-red-600 hover:bg-red-500 hover:scale-105 active:scale-95 text-white flex items-center justify-center shadow-2xl transition mb-4 border-2 border-white/20"
+            >
+              <Play className="w-10 h-10 fill-white translate-x-1" />
+            </button>
+            <h3 className="text-lg font-bold text-white mb-1">انقر لبدء المشاهدة وتشغيل الصوت</h3>
+            <p className="text-xs text-neutral-400 max-w-sm">
+              تم إيقاف التشغيل مؤقتاً للامتثال لسياسة متصفحك. الضغط هنا يتيح بدء البث والصوت فوراً.
+            </p>
+          </div>
+        )}
+
+        {/* 3. Error Notice */}
         {errorMsg && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-neutral-950/92 backdrop-blur-xl p-6 sm:p-8 text-center z-30 border border-neutral-800/80 rounded-2xl shadow-2xl transition-all duration-300 select-none">
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-neutral-950/95 backdrop-blur-xl p-6 sm:p-8 text-center z-30 border border-neutral-800/80 rounded-2xl shadow-2xl transition-all duration-300 select-none">
             <p className="text-sm sm:text-base font-semibold text-neutral-200 mb-4 max-w-md leading-relaxed drop-shadow">
               {errorMsg}
             </p>
@@ -398,7 +527,7 @@ export default function VideoPlayer({
           </div>
         )}
 
-        {/* Overlay Title when paused */}
+        {/* Overlay Title */}
         {showControls && title && (
           <div className="absolute top-0 inset-x-0 p-4 bg-gradient-to-b from-black/80 to-transparent flex items-center justify-between text-white pointer-events-none">
             <div className="flex items-center gap-2">
@@ -411,15 +540,15 @@ export default function VideoPlayer({
               </span>
               {useProxy && (
                 <span className="px-2 py-0.5 rounded bg-red-950/80 border border-red-800 text-red-400 text-[10px]">
-                  PROXIED
+                  PROXIED (206 RANGE)
                 </span>
               )}
             </div>
           </div>
         )}
 
-        {/* Center Big Play Button (when paused) */}
-        {!isPlaying && !isLoading && !errorMsg && (
+        {/* Center Big Play Button (when paused and not blocked) */}
+        {!isPlaying && !isLoading && !errorMsg && !autoplayBlocked && (
           <button
             type="button"
             onClick={togglePlay}
@@ -437,14 +566,12 @@ export default function VideoPlayer({
           }`}
           dir="ltr"
         >
-          {/* Progress Timeline */}
+          {/* Progress Timeline with HTTP Range Seeking */}
           <div className="relative w-full flex items-center group/timeline mb-3">
-            {/* Buffered Progress */}
             <div
               className="absolute left-0 h-1.5 rounded-full bg-neutral-700/80 pointer-events-none"
               style={{ width: `${buffered}%` }}
             ></div>
-            {/* Played Progress */}
             <div
               className="absolute left-0 h-1.5 rounded-full bg-red-600 pointer-events-none"
               style={{ width: `${(currentTime / (duration || 1)) * 100}%` }}
@@ -493,7 +620,7 @@ export default function VideoPlayer({
                 <RotateCw className="w-4 h-4" />
               </button>
 
-              {/* Volume */}
+              {/* Volume & Unmute */}
               <div className="flex items-center gap-1.5 group/volume">
                 <button
                   type="button"
@@ -527,7 +654,7 @@ export default function VideoPlayer({
 
             {/* Right Controls: Quality, Speed, Theater, Fullscreen */}
             <div className="flex items-center gap-2">
-              {/* Dynamic Quality Selector Dropdown (Seamless Switching) */}
+              {/* Dynamic Quality Selector */}
               {servers && servers.length > 0 && (
                 <div className="flex items-center gap-1.5 bg-neutral-900/90 hover:bg-neutral-800/90 border border-neutral-700/80 hover:border-neutral-500 rounded-xl px-2.5 py-1 transition shadow-sm">
                   <SlidersHorizontal className="w-3.5 h-3.5 text-red-500 shrink-0" />
@@ -593,10 +720,10 @@ export default function VideoPlayer({
                     {/* Proxy toggle */}
                     <button
                       type="button"
-                      onClick={() => setUseProxy(!useProxy)}
+                      onClick={() => setProxyOverride(!useProxy)}
                       className="w-full flex items-center justify-between p-2 rounded-xl text-neutral-300 hover:bg-neutral-800 text-right mt-1"
                     >
-                      <span>توجيه عبر البروكسي</span>
+                      <span>وسيط البث (Range Proxy)</span>
                       {useProxy ? (
                         <Check className="w-3.5 h-3.5 text-red-500" />
                       ) : (
@@ -639,13 +766,14 @@ export default function VideoPlayer({
             <span>سيرفرات المشاهدة والجودات المتاحة:</span>
           </div>
           <span className="text-xs text-neutral-400">
-            اختر السيرفر أو الجودة لتحديث البث تلقائياً دون إعادة تحميل الصفحة
+            اختر السيرفر أو الجودة لتحديث البث تلقائياً مع الاحتفاظ بموضع المشاهدة
           </span>
         </div>
 
         <div className="flex flex-wrap gap-2.5">
           {servers.map((srv, idx) => {
             const isSelected = selectedServerIndex === idx;
+            const isMkv = srv.url.toLowerCase().includes('.mkv') || srv.type === 'mkv';
             return (
               <button
                 key={idx}
@@ -661,6 +789,11 @@ export default function VideoPlayer({
                   {srv.quality}p
                 </span>
                 <span>{srv.name}</span>
+                {isMkv && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono">
+                    MKV
+                  </span>
+                )}
                 {isSelected && <Check className="w-3.5 h-3.5" />}
               </button>
             );
