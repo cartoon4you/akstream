@@ -1,0 +1,61 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function isValidUserProfile(data, userId) {
+      return data.userId == userId &&
+        data.userId is string && data.userId.size() <= 128 &&
+        data.email is string && data.email.size() <= 256 &&
+        (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 150)) &&
+        (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() <= 1000)) &&
+        (!('createdAt' in data) || (data.createdAt is string && data.createdAt.size() <= 100));
+    }
+
+    function isValidWatchlistItem(data, userId) {
+      return data.userId == userId &&
+        data.id is string && data.id.size() <= 256 &&
+        data.title is string && data.title.size() <= 300 &&
+        (!('poster' in data) || (data.poster is string && data.poster.size() <= 1000)) &&
+        (!('rating' in data) || (data.rating is string && data.rating.size() <= 50)) &&
+        (!('year' in data) || (data.year is string && data.year.size() <= 50)) &&
+        (!('type' in data) || (data.type is string && data.type.size() <= 50)) &&
+        (!('addedAt' in data) || (data.addedAt is string && data.addedAt.size() <= 100));
+    }
+
+    // Users collection and subcollections
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow list: if false;
+      allow create: if isOwner(userId) && isValidUserProfile(incoming(), userId);
+      allow update: if isOwner(userId) && isValidUserProfile(incoming(), userId);
+      allow delete: if isOwner(userId);
+
+      // User watchlist subcollection
+      match /watchlist/{itemId} {
+        allow get: if isOwner(userId);
+        allow list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidWatchlistItem(incoming(), userId);
+        allow update: if isOwner(userId) && isValidWatchlistItem(incoming(), userId);
+        allow delete: if isOwner(userId);
+      }
+    }
+  }
+}

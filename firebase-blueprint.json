@@ -1,0 +1,82 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "displayName": {
+          "type": "string",
+          "maxLength": 150
+        },
+        "photoURL": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "createdAt": {
+          "type": "string",
+          "maxLength": 100
+        }
+      },
+      "required": ["userId", "email"]
+    },
+    "WatchlistItem": {
+      "title": "WatchlistItem",
+      "description": "An item saved to the user's personal watchlist",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "poster": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "rating": {
+          "type": "string",
+          "maxLength": 50
+        },
+        "year": {
+          "type": "string",
+          "maxLength": 50
+        },
+        "type": {
+          "type": "string",
+          "maxLength": 50
+        },
+        "userId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "addedAt": {
+          "type": "string",
+          "maxLength": 100
+        }
+      },
+      "required": ["id", "title", "userId"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile document storing basic account metadata"
+    },
+    "/users/{userId}/watchlist/{itemId}": {
+      "schema": "WatchlistItem",
+      "description": "Items added by the user to their personal watchlist"
+    }
+  }
+}
