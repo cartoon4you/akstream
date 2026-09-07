@@ -34,6 +34,7 @@ function WatchContent() {
   const [loading, setLoading] = useState(true);
   const [copiedLink, setCopiedLink] = useState(false);
   const [copiedAllLinks, setCopiedAllLinks] = useState(false);
+  const [loadingEpisode, setLoadingEpisode] = useState(false);
 
   const { isInWatchlist, addToWatchlist, removeFromWatchlist } = useWatchlist();
 
@@ -52,7 +53,7 @@ function WatchContent() {
             // Select first episode by default for series
             const firstEp = item.episodes[0];
             setSelectedEpisode(firstEp);
-            setActiveServers(firstEp.servers || []);
+            setActiveServers(firstEp.servers && firstEp.servers.length > 0 ? firstEp.servers : item.servers || []);
           } else {
             setActiveServers(item.servers || []);
           }
@@ -68,9 +69,31 @@ function WatchContent() {
   }, [mediaId]);
 
   // When user picks an episode in TV series
-  const handleSelectEpisode = (ep: EpisodeItem) => {
+  const handleSelectEpisode = async (ep: EpisodeItem) => {
     setSelectedEpisode(ep);
-    setActiveServers(ep.servers || []);
+
+    // If this episode already has extracted direct servers
+    if (ep.servers && ep.servers.length > 0) {
+      setActiveServers(ep.servers);
+    } else {
+      try {
+        setLoadingEpisode(true);
+        const res = await fetch(`/api/details?id=${encodeURIComponent(ep.id)}`);
+        const json = await res.json();
+        if (json.success && json.data?.servers && json.data.servers.length > 0) {
+          ep.servers = json.data.servers;
+          setActiveServers(json.data.servers);
+        } else {
+          setActiveServers(ep.servers || []);
+        }
+      } catch (err) {
+        console.warn('Failed to fetch episode details:', err);
+        setActiveServers(ep.servers || []);
+      } finally {
+        setLoadingEpisode(false);
+      }
+    }
+
     // Scroll smoothly to player
     const playerEl = document.getElementById('cinematic-video-player');
     if (playerEl) {

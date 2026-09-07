@@ -70,11 +70,16 @@ export default function VideoPlayer({
     return u.includes('.mkv') || activeServer?.type === 'mkv';
   }, [activeServer]);
 
-  // Default strictly to NO PROXY (Direct stream playback from server URL)
+  // Automatically route through streaming proxy for Akwam / Downet / protected CDN streams
+  // This bypasses CDN 403 hotlink blocks and provides seamless 206 Partial Content video streaming
   const useProxy = useMemo(() => {
-    // Only use proxy if explicitly requested by user toggle in settings
-    return proxyOverride === true;
-  }, [proxyOverride]);
+    if (proxyOverride !== null) return proxyOverride;
+    const u = (activeServer?.url || '').toLowerCase();
+    if (u.includes('downet.net') || u.includes('akwam') || u.includes('ak.sv') || u.includes('/download/')) {
+      return true;
+    }
+    return false;
+  }, [activeServer, proxyOverride]);
 
   // Compute final stream URL (direct URL by default without any proxy)
   const streamUrl = useMemo(() => {
@@ -191,11 +196,7 @@ export default function VideoPlayer({
         }
 
         setIsLoading(false);
-        if (isMkvFormat) {
-          setErrorMsg('هذا الملف بصيغة MKV غير المدعومة في مشغل المتصفح. يرجى اختيار جودة أخرى (MP4) أو تحميل الملف.');
-        } else {
-          setErrorMsg('تعذر تشغيل هذا الرابط حالياً. يرجى اختيار جودة أخرى (1080p أو 720p أو 480p) أو إعادة المحاولة.');
-        }
+        setErrorMsg('تعذر تشغيل هذا الرابط مباشرة في المتصفح حالياً. يرجى اختيار جودة أخرى أو إعادة المحاولة أو التحميل المباشر.');
       };
 
       video.addEventListener('canplay', handleCanPlay);

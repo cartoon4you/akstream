@@ -189,15 +189,13 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // تحديد نوع المحتوى تلقائياً
+    // تحديد نوع المحتوى تلقائياً (دعم كامل لمشغل المتصفح HTML5)
     let contentType = upstreamHeaders['content-type'] as string | undefined;
     const lowerUrl = videoUrl.toLowerCase();
-    if (!contentType || contentType === 'application/octet-stream') {
-      if (lowerUrl.includes('.mp4')) contentType = 'video/mp4';
-      else if (lowerUrl.includes('.m3u8')) contentType = 'application/vnd.apple.mpegurl';
-      else if (lowerUrl.includes('.mkv')) contentType = 'video/x-matroska';
+    if (!contentType || contentType === 'application/octet-stream' || contentType === 'video/x-matroska') {
+      if (lowerUrl.includes('.m3u8')) contentType = 'application/vnd.apple.mpegurl';
       else if (lowerUrl.includes('.webm')) contentType = 'video/webm';
-      else contentType = 'video/mp4';
+      else contentType = 'video/mp4'; // تمرير video/mp4 ليتمكن محرك المتصفح من تشغيل وفك ترميز الفيديو مباشرة
     }
 
     // تجهيز الهيدرز المتوافقة مع CORS والـ HTML5 Players
