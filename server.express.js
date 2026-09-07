@@ -1,13 +1,6 @@
 /**
  * Akwam Video Proxy Server (Node.js & Express.js)
- *
- * This Express server resolves the two main streaming issues:
- * 1. 500 Internal Server Error & Range handling:
- *    - Passes HTTP Range requests to the source (Status 206 Partial Content).
- *    - Forwards exact Referer (https://akwam.ss/) and User-Agent expected by Akwam/Downet.
- *    - Pipes the video stream directly to the client without loading into RAM.
- *    - Listens to client socket closes to avoid ECONNRESET and server crashes.
- *    - Enforces 'Accept-Encoding: identity' so gzip does not corrupt byte offsets.
+ * Fixed: Dynamic Host header on redirects & memory leak cleanups.
  */
 
 const express = require('express');
@@ -19,7 +12,7 @@ const { URL } = require('url');
 const app = express();
 const PORT = process.env.PROXY_PORT || 4000;
 
-// Enable CORS for frontend players (Video.js, Plyr, native HTML5)
+// Enable CORS for frontend players
 app.use(
   cors({
     origin: '*',
@@ -30,19 +23,25 @@ app.use(
 );
 
 /**
- * Recursive request helper that handles 301/302 redirects while preserving Referer
+ * Recursive request helper that handles 301/302 redirects while updating Host & Referer
  */
-function fetchUpstreamStream(targetUrl, headers, maxRedirects = 5) {
+function fetchUpstreamStream(targetUrl, baseHeaders, maxRedirects = 5) {
   return new Promise((resolve, reject) => {
     try {
       const parsed = new URL(targetUrl);
       const client = parsed.protocol === 'https:' ? https : http;
 
+      // تحديث هيدر الـ Host ديناميكياً ليتوافق مع السيرفر الجديد
+      const activeHeaders = {
+        ...baseHeaders,
+        Host: parsed.host,
+      };
+
       const req = client.request(
         targetUrl,
         {
           method: 'GET',
-          headers,
+          headers: activeHeaders,
           rejectUnauthorized: false, // Prevents SSL failures on Akwam CDN mirrors
           timeout: 30000,
         },
@@ -55,8 +54,14 @@ function fetchUpstreamStream(targetUrl, headers, maxRedirects = 5) {
             maxRedirects > 0
           ) {
             const redirectTarget = new URL(res.headers.location, targetUrl).toString();
-            res.resume(); // Clean up unused sockets
-            return fetchUpstreamStream(redirectTarget, headers, maxRedirects - 1)
+            
+            // تحرير المقبس (Socket) فوراً لمنع تسريب الذاكرة أثناء التحويل المتكرر
+            res.resume();
+
+            const updatedHeaders = { ...baseHeaders };
+            updatedHeaders['Referer'] = targetUrl; // تحديث الـ Referer إلى الرابط السابق
+
+            return fetchUpstreamStream(redirectTarget, updatedHeaders, maxRedirects - 1)
               .then(resolve)
               .catch(reject);
           }
@@ -86,27 +91,58 @@ function fetchUpstreamStream(targetUrl, headers, maxRedirects = 5) {
 
 /**
  * Video Streaming & Range Proxy Endpoint
- * Example: GET /api/proxy/video?url=https://downet.net/download/xyz.mp4&referer=https://akwam.ss/
  */
 app.get('/api/proxy/video', async (req, res) => {
   const videoUrl = req.query.url;
-  const referer = req.query.referer || 'https://akwam.ss/';
+  const defaultReferer = process.env.AKWAM_BASE_URL ? `${process.env.AKWAM_BASE_URL}/` : 'https://akwam.ss/';
+  const referer = req.query.referer || defaultReferer;
 
   if (!videoUrl) {
     return res.status(400).json({ error: 'Missing "url" query parameter' });
   }
 
+  // Validate host against STREAM_ALLOWED_HOSTS if configured
+  const allowedHostsStr = process.env.STREAM_ALLOWED_HOSTS;
+  if (allowedHostsStr) {
+    try {
+      const parsedUrl = new URL(videoUrl);
+      const targetHost = parsedUrl.hostname.toLowerCase();
+      const allowedHosts = allowedHostsStr
+        .split(',')
+        .map((h) => h.trim().toLowerCase())
+        .filter(Boolean);
+
+      if (allowedHosts.length > 0) {
+        const isAllowed = allowedHosts.some((allowed) => {
+          if (allowed.startsWith('.')) {
+            return targetHost.endsWith(allowed) || targetHost === allowed.slice(1);
+          }
+          return targetHost === allowed || targetHost.endsWith(`.${allowed}`);
+        });
+
+        if (!isAllowed) {
+          return res.status(403).json({
+            error: `Host ${targetHost} is not permitted by STREAM_ALLOWED_HOSTS`,
+          });
+        }
+      }
+    } catch {
+      return res.status(400).json({ error: 'Invalid video URL' });
+    }
+  }
+
   try {
     const rangeHeader = req.headers.range;
+    const userAgent =
+      process.env.SCRAPER_USER_AGENT ||
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
 
-    // Headers required by Akwam / Downet CDN
     const upstreamHeaders = {
-      'User-Agent':
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+      'User-Agent': userAgent,
       Referer: referer,
       Accept: '*/*',
       'Accept-Language': 'ar,en;q=0.9',
-      'Accept-Encoding': 'identity', // Crucial: prevents gzip corruption on Range queries
+      'Accept-Encoding': 'identity', // Crucial for Byte Ranges
       Connection: 'keep-alive',
     };
 
@@ -129,11 +165,11 @@ app.get('/api/proxy/video', async (req, res) => {
       else contentType = 'video/mp4';
     }
 
-    // Set streaming and Range headers
+    // Set headers
     res.status(statusCode);
     res.setHeader('Content-Type', contentType);
     res.setHeader('Accept-Ranges', 'bytes');
-    res.setHeader('Cache-Control', 'public, max-age=3600');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate'); // يفضل منع الكاش للروابط المؤقتة
 
     if (sourceHeaders['content-length']) {
       res.setHeader('Content-Length', sourceHeaders['content-length']);
@@ -143,12 +179,10 @@ app.get('/api/proxy/video', async (req, res) => {
       res.setHeader('Content-Range', sourceHeaders['content-range']);
     }
 
-    // Prevent server crash if client disconnects / seeks ahead
+    // تنظيف الاتصال في حال إغلاق المتصفح أو تقديم الفيديو
     req.on('close', () => {
-      try {
+      if (stream && !stream.destroyed) {
         stream.destroy();
-      } catch (e) {
-        // ignore
       }
     });
 
@@ -159,7 +193,7 @@ app.get('/api/proxy/video', async (req, res) => {
       }
     });
 
-    // Pipe directly to client response
+    // Pipe stream to client
     stream.pipe(res);
   } catch (err) {
     console.error('Proxy handler error:', err.message);

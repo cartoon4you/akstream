@@ -15,10 +15,12 @@ import {
 } from 'lucide-react';
 import { useWatchlist } from '@/contexts/WatchlistContext';
 import { useAuth } from '@/contexts/AuthContext';
+import { useIsMounted } from '@/hooks/use-mounted';
 
 export default function WatchlistPage() {
   const { watchlist, removeFromWatchlist, isCloudSynced, loading } = useWatchlist();
   const { currentUser, signInWithGoogle } = useAuth();
+  const mounted = useIsMounted();
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 space-y-8" dir="rtl">
@@ -78,7 +80,7 @@ export default function WatchlistPage() {
       )}
 
       {/* Watchlist Items Grid */}
-      {loading ? (
+      {loading || !mounted ? (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
           {[...Array(6)].map((_, i) => (
             <div key={i} className="aspect-[2/3] bg-neutral-900 rounded-2xl animate-pulse" />

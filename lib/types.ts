@@ -3,7 +3,7 @@ export interface ServerOption {
   quality: number; // 1080, 720, 480, 360
   url: string;
   referer?: string;
-  type?: 'mp4' | 'hls' | 'embed';
+  type?: 'mp4' | 'hls' | 'embed' | 'mkv';
 }
 
 export interface EpisodeItem {

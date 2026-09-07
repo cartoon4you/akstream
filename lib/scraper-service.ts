@@ -2,15 +2,21 @@ import * as cheerio from 'cheerio';
 import { MediaItem, ServerOption, EpisodeItem, LinkGrabberResult, LinkGrabberFile } from './types';
 import { SAMPLE_CATALOG } from './catalog-data';
 
-const BASE_URL = 'https://akwam.ss';
+const BASE_URL = process.env.AKWAM_BASE_URL || 'https://akwam.ss';
+
+const DEFAULT_USER_AGENT = process.env.SCRAPER_USER_AGENT || 'CineStream/1.0';
 
 const USER_AGENTS = [
+  DEFAULT_USER_AGENT,
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15',
   'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36',
 ];
 
 function getRandomUserAgent(): string {
+  if (process.env.SCRAPER_USER_AGENT) {
+    return process.env.SCRAPER_USER_AGENT;
+  }
   return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
 }
 
@@ -324,71 +330,106 @@ export async function getMediaDetails(id: string): Promise<MediaItem | null> {
       const isSeries = fullUrl.includes('/series/') || title.includes('مسلسل');
 
       const servers: ServerOption[] = [];
-      const foundQualities = new Map<number, string>();
+      const seenUrls = new Set<string>();
 
-      // 1. Search for quality tabs or elements (div.tab-content.quality, [data-quality], etc.)
-      $('div.tab-content.quality, div.tab-pane, [data-quality], .quality').each((_, el) => {
-        const text = $(el).text();
-        const href = $(el).find('a').attr('href') || '';
-        const match = (text + ' ' + href).match(/(1080|720|480|4k|360)/i);
-        if (match && href) {
-          const qNum = match[1].toLowerCase() === '4k' ? 2160 : parseInt(match[1]);
-          const fullHref = href.startsWith('http') ? href : `${BASE_URL}${href}`;
-          foundQualities.set(qNum, fullHref);
-        }
-      });
+      // Comprehensive DOM scanner for quality markers: 1080p, 720p, 480p, 4k, 360p
+      const extractQualityNum = (text: string): number => {
+        const match = text.match(/(2160p?|4k|1080p?|720p?|480p?|360p?|fhd|hd|sd)/i);
+        if (!match) return 720;
+        const q = match[1].toLowerCase();
+        if (q.includes('4k') || q.includes('2160')) return 2160;
+        if (q.includes('1080') || q.includes('fhd')) return 1080;
+        if (q.includes('720') || q.includes('hd')) return 720;
+        if (q.includes('480') || q.includes('sd')) return 480;
+        if (q.includes('360')) return 360;
+        return 720;
+      };
 
-      // 2. Look for real watch page links
-      const watchLinks: string[] = [];
-      $('a[href*="/watch/"]').each((_, el) => {
-        const href = $(el).attr('href');
-        if (href && !watchLinks.includes(href)) {
-          watchLinks.push(href.startsWith('http') ? href : `${BASE_URL}${href}`);
-        }
-      });
-
-      for (const wUrl of watchLinks.slice(0, 3)) {
-        const $watch = await fetchHTML(wUrl);
-        if ($watch) {
-          const directVideoSrc =
-            $watch('video source').attr('src') ||
-            $watch('video').attr('src') ||
-            $watch('a[href*=".mp4"]').attr('href') ||
-            $watch('a[href*="downet.net"]').attr('href');
-
-          const watchText = $watch.text();
-          const qMatch = watchText.match(/(1080|720|480|4k)/i);
-          const qNum = qMatch ? (qMatch[1].toLowerCase() === '4k' ? 2160 : parseInt(qMatch[1])) : 1080;
-
-          if (directVideoSrc && !servers.some((s) => s.url === directVideoSrc)) {
+      // 1. Scan quality tabs, pill buttons, badges and containers
+      $('div.tab-content, div.tab-pane, [data-quality], .quality, .quality-btn, .btn-quality, .download-link, .watch-link, .link-btn, .btn-group a').each((_, el) => {
+        const $el = $(el);
+        const text = ($el.text() + ' ' + ($el.attr('data-quality') || '') + ' ' + ($el.attr('id') || '') + ' ' + ($el.attr('class') || '')).trim();
+        const href = $el.attr('href') || $el.find('a').attr('href') || $el.attr('data-url') || '';
+        if (href && (text.match(/(1080|720|480|4k|360)/i) || href.match(/(1080|720|480|4k|360)/i))) {
+          const qNum = extractQualityNum(text + ' ' + href);
+          const fullHref = href.startsWith('http') ? href : `${BASE_URL}${href.startsWith('/') ? '' : '/'}${href}`;
+          if (!seenUrls.has(fullHref)) {
+            seenUrls.add(fullHref);
             servers.push({
-              name: `سيرفر أكوام المباشر (${qNum}p)`,
+              name: `سيرفر مباشر (${qNum}p)`,
               quality: qNum,
-              url: directVideoSrc,
+              url: fullHref,
               referer: 'https://akwam.ss/',
-              type: 'mp4',
+              type: fullHref.includes('.m3u8') ? 'hls' : fullHref.includes('.mkv') ? 'mkv' : 'mp4',
             });
           }
         }
-      }
+      });
 
-      // 3. Add direct download links with quality tags
-      $('a[href*="/download/"], a[href*="ak.sv"], a[href*="downet.net"]').each((_, el) => {
-        const dUrl = $(el).attr('href');
-        const dText = $(el).text().trim() || 'تحميل مباشر';
-        const qMatch = (dText + ' ' + (dUrl || '')).match(/(1080|720|480|4k|360)/i);
-        const qNum = qMatch ? (qMatch[1].toLowerCase() === '4k' ? 2160 : parseInt(qMatch[1])) : 720;
+      // 2. Comprehensive Scan for all <a> tags with quality keywords in text, href or class
+      $('a').each((_, el) => {
+        const $a = $(el);
+        const href = $a.attr('href') || '';
+        const text = $a.text().trim();
+        const fullContext = `${text} ${href} ${$a.attr('class') || ''} ${$a.attr('title') || ''}`;
 
-        if (dUrl && !servers.some((s) => s.url === dUrl)) {
-          servers.push({
-            name: `${dText.includes('1080') || dText.includes('720') || dText.includes('480') ? dText : `${dText} (${qNum}p)`}`,
-            quality: qNum,
-            url: dUrl.startsWith('http') ? dUrl : `${BASE_URL}${dUrl}`,
-            referer: 'https://akwam.ss/',
-            type: 'mp4',
-          });
+        if (
+          href &&
+          (href.includes('/watch/') ||
+            href.includes('/download/') ||
+            href.includes('downet.net') ||
+            href.includes('ak.sv') ||
+            href.includes('.mp4') ||
+            href.includes('.mkv') ||
+            href.includes('.m3u8') ||
+            fullContext.match(/(1080p?|720p?|480p?|4k|360p?)/i))
+        ) {
+          const qNum = extractQualityNum(fullContext);
+          const fullHref = href.startsWith('http') ? href : `${BASE_URL}${href.startsWith('/') ? '' : '/'}${href}`;
+          if (!seenUrls.has(fullHref)) {
+            seenUrls.add(fullHref);
+            const isWatchPage = href.includes('/watch/');
+            servers.push({
+              name: isWatchPage ? `سيرفر مشاهدة (${qNum}p)` : `سيرفر تحميل وبث (${qNum}p)`,
+              quality: qNum,
+              url: fullHref,
+              referer: 'https://akwam.ss/',
+              type: fullHref.includes('.m3u8') ? 'hls' : fullHref.includes('.mkv') ? 'mkv' : 'mp4',
+            });
+          }
         }
       });
+
+      // 3. Follow intermediate watch pages to extract real direct video URLs
+      const watchServerLinks = servers.filter((s) => s.url.includes('/watch/')).slice(0, 4);
+      for (const srv of watchServerLinks) {
+        try {
+          const $watch = await fetchHTML(srv.url);
+          if ($watch) {
+            const directVideoSrc =
+              $watch('video source').attr('src') ||
+              $watch('video').attr('src') ||
+              $watch('iframe').attr('src') ||
+              $watch('a[href*=".mp4"]').attr('href') ||
+              $watch('a[href*="downet.net"]').attr('href');
+
+            if (directVideoSrc && !seenUrls.has(directVideoSrc)) {
+              seenUrls.add(directVideoSrc);
+              const watchContext = $watch.text();
+              const qNum = extractQualityNum(watchContext) || srv.quality;
+              servers.unshift({
+                name: `سيرفر أكوام مباشر (${qNum}p)`,
+                quality: qNum,
+                url: directVideoSrc.startsWith('http') ? directVideoSrc : `${BASE_URL}${directVideoSrc}`,
+                referer: 'https://akwam.ss/',
+                type: directVideoSrc.includes('.m3u8') ? 'hls' : directVideoSrc.includes('.mkv') ? 'mkv' : 'mp4',
+              });
+            }
+          }
+        } catch {
+          // ignore error fetching watch page
+        }
+      }
 
       // Series episodes parsing
       const episodes: EpisodeItem[] = [];

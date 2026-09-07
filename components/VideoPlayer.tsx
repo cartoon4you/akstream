@@ -19,7 +19,6 @@ import {
   SlidersHorizontal,
   AlertTriangle,
   Download,
-  VolumeCheck,
 } from 'lucide-react';
 import { ServerOption } from '@/lib/types';
 
@@ -71,14 +70,13 @@ export default function VideoPlayer({
     return u.includes('.mkv') || activeServer?.type === 'mkv';
   }, [activeServer]);
 
-  // Compute if proxy should be used: user manual toggle or auto-detected for akwam/downet
+  // Default strictly to NO PROXY (Direct stream playback from server URL)
   const useProxy = useMemo(() => {
-    if (proxyOverride !== null) return proxyOverride;
-    const u = activeServer?.url || '';
-    return u.includes('downet.net') || u.includes('akwam') || u.includes('ak.sv');
-  }, [proxyOverride, activeServer]);
+    // Only use proxy if explicitly requested by user toggle in settings
+    return proxyOverride === true;
+  }, [proxyOverride]);
 
-  // Compute final stream URL (proxied with full Range 206 support or direct)
+  // Compute final stream URL (direct URL by default without any proxy)
   const streamUrl = useMemo(() => {
     if (!activeServer) return '';
     if (useProxy) {
@@ -168,11 +166,8 @@ export default function VideoPlayer({
       hls.on(Hls.Events.ERROR, (_event, data) => {
         if (data.fatal) {
           console.warn('HLS Fatal Error:', data.type);
-          if (!useProxy) {
-            setProxyOverride(true);
-          } else {
-            setErrorMsg('تعذر تشغيل هذا السيرفر، يرجى اختيار سيرفر آخر من القائمة.');
-          }
+          setIsLoading(false);
+          setErrorMsg('تعذر تشغيل هذا البث المباشر. يرجى اختيار سيرفر آخر من القائمة.');
         }
       });
     } else {
@@ -187,15 +182,19 @@ export default function VideoPlayer({
       };
 
       const handleError = () => {
-        if (!useProxy) {
+        // If direct playback fails (due to CDN hotlink/CORS rules on Downet/Akwam),
+        // automatically fallback to the optimized streaming proxy without failing
+        if (!useProxy && proxyOverride !== false) {
+          console.warn('Direct playback blocked; automatically attempting streaming proxy...');
           setProxyOverride(true);
+          return;
+        }
+
+        setIsLoading(false);
+        if (isMkvFormat) {
+          setErrorMsg('هذا الملف بصيغة MKV غير المدعومة في مشغل المتصفح. يرجى اختيار جودة أخرى (MP4) أو تحميل الملف.');
         } else {
-          setIsLoading(false);
-          if (isMkvFormat) {
-            setErrorMsg('هذا الملف بصيغة MKV غير المدعومة في مشغل المتصفح. يرجى اختيار سيرفر MP4 أو تحميل الملف.');
-          } else {
-            setErrorMsg('تعذر تشغيل الرابط المباشر، يمكنك اختيار سيرفر بديل أو تفعيل البروكسي.');
-          }
+          setErrorMsg('تعذر تشغيل هذا الرابط حالياً. يرجى اختيار جودة أخرى (1080p أو 720p أو 480p) أو إعادة المحاولة.');
         }
       };
 
@@ -214,7 +213,7 @@ export default function VideoPlayer({
         hlsRef.current = null;
       }
     };
-  }, [streamUrl, activeServer, useProxy, isMkvFormat, safePlay]);
+  }, [streamUrl, activeServer, useProxy, proxyOverride, isMkvFormat, safePlay]);
 
   // Seamless Quality Switch preserving exact playback position
   const changeQuality = (index: number) => {
@@ -508,21 +507,35 @@ export default function VideoPlayer({
             <div className="flex flex-wrap items-center justify-center gap-3">
               <button
                 type="button"
-                onClick={() => setProxyOverride(!useProxy)}
-                className="px-5 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 active:scale-95 text-xs sm:text-sm font-bold text-white shadow-xl shadow-red-950/60 transition-all duration-200 flex items-center justify-center gap-2 border border-red-500/30 cursor-pointer"
+                onClick={() => {
+                  setErrorMsg(null);
+                  setIsLoading(true);
+                  if (videoRef.current) {
+                    videoRef.current.load();
+                    safePlay(videoRef.current);
+                  }
+                }}
+                className="px-5 py-2.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 active:scale-95 text-xs sm:text-sm font-bold text-white shadow-xl transition-all duration-200 flex items-center justify-center gap-2 border border-neutral-700 cursor-pointer"
               >
-                {useProxy ? 'إعادة المحاولة عبر البروكسي' : 'تفعيل وسيط البث المباشر (Stream Proxy)'}
+                إعادة المحاولة المباشرة
               </button>
               {servers.length > 1 && (
                 <button
                   type="button"
                   onClick={() => switchServer((selectedServerIndex + 1) % servers.length)}
-                  className="px-4 py-2.5 rounded-xl bg-neutral-800/90 hover:bg-neutral-700 active:scale-95 text-xs font-semibold text-neutral-200 hover:text-white border border-neutral-700/80 transition flex items-center gap-2 cursor-pointer"
+                  className="px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 active:scale-95 text-xs font-semibold text-white border border-red-500/80 transition flex items-center gap-2 cursor-pointer"
                 >
-                  <Tv className="w-3.5 h-3.5 text-neutral-400" />
-                  تجربة سيرفر بديل
+                  <Tv className="w-3.5 h-3.5" />
+                  تجربة سيرفر آخر
                 </button>
               )}
+              <button
+                type="button"
+                onClick={() => setProxyOverride(!useProxy)}
+                className="px-3.5 py-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-[11px] font-medium text-neutral-400 hover:text-neutral-200 border border-neutral-800 transition cursor-pointer"
+              >
+                {useProxy ? 'العودة للتشغيل المباشر' : 'تجربة وسيط البث (Proxy)'}
+              </button>
             </div>
           </div>
         )}
@@ -538,9 +551,14 @@ export default function VideoPlayer({
               <span className="px-2 py-0.5 rounded bg-neutral-800/80 border border-neutral-700 text-white font-bold">
                 {activeServer.quality}p
               </span>
-              {useProxy && (
+              {useProxy ? (
                 <span className="px-2 py-0.5 rounded bg-red-950/80 border border-red-800 text-red-400 text-[10px]">
                   PROXIED (206 RANGE)
+                </span>
+              ) : (
+                <span className="px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-800/80 text-emerald-400 text-[10px] flex items-center gap-1.5 font-medium">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                  تشغيل مباشر (دون بروكسي)
                 </span>
               )}
             </div>
@@ -721,13 +739,20 @@ export default function VideoPlayer({
                     <button
                       type="button"
                       onClick={() => setProxyOverride(!useProxy)}
-                      className="w-full flex items-center justify-between p-2 rounded-xl text-neutral-300 hover:bg-neutral-800 text-right mt-1"
+                      className="w-full flex items-center justify-between p-2 rounded-xl text-neutral-300 hover:bg-neutral-800 text-right mt-1 transition"
                     >
-                      <span>وسيط البث (Range Proxy)</span>
+                      <div className="flex flex-col text-right">
+                        <span>وسيط البث (Proxy)</span>
+                        <span className="text-[10px] text-neutral-400">
+                          {useProxy ? 'مفعّل حالياً' : 'معطل (تشغيل مباشر دون بروكسي)'}
+                        </span>
+                      </div>
                       {useProxy ? (
                         <Check className="w-3.5 h-3.5 text-red-500" />
                       ) : (
-                        <span className="text-[10px] text-neutral-500">معطل</span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-neutral-800 text-emerald-400 border border-emerald-900/60 font-medium">
+                          مباشر
+                        </span>
                       )}
                     </button>
                   </div>
@@ -801,17 +826,17 @@ export default function VideoPlayer({
         </div>
 
         {/* Direct Download Link Option */}
-        <div className="pt-2 border-t border-neutral-800/80 flex items-center justify-between text-xs text-neutral-400">
-          <span>رابط التشغيل المباشر: {activeServer?.name}</span>
+        <div className="pt-2 border-t border-neutral-800 flex items-center justify-between text-xs text-neutral-400">
+          <span>تفضّل التحميل المباشر للفيلم/الحلقة؟</span>
           <a
-            href={activeServer?.url}
+            href={activeServer.url}
+            download
             target="_blank"
             rel="noopener noreferrer"
-            download
-            className="flex items-center gap-1 text-red-400 hover:text-red-300 font-medium transition"
+            className="flex items-center gap-1.5 text-red-400 hover:text-red-300 font-semibold transition hover:underline"
           >
-            <span>تحميل مباشر للملف</span>
-            <ExternalLink className="w-3 h-3" />
+            <span>تحميل عبر السيرفر الحالي ({activeServer.quality}p)</span>
+            <ExternalLink className="w-3.5 h-3.5" />
           </a>
         </div>
       </div>

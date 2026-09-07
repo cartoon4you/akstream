@@ -188,9 +188,9 @@ export default function LinkGrabberPage() {
         currentFilename: file.filename,
       });
 
-      // Trigger download via anchor
+      // Trigger download via anchor (direct url without proxy)
       const downloadAnchor = document.createElement('a');
-      downloadAnchor.href = file.proxy_url;
+      downloadAnchor.href = file.direct_url || file.proxy_url;
       downloadAnchor.download = file.filename;
       downloadAnchor.target = '_blank';
       document.body.appendChild(downloadAnchor);
@@ -583,12 +583,14 @@ if __name__ == '__main__':
 
                       {/* Direct Download */}
                       <a
-                        href={file.proxy_url}
+                        href={file.direct_url || file.proxy_url}
                         download={file.filename}
+                        target="_blank"
+                        rel="noopener noreferrer"
                         className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-neutral-800 hover:bg-red-600 hover:border-red-500 text-neutral-200 hover:text-white text-xs font-semibold border border-neutral-700 transition"
                       >
                         <Download className="w-3.5 h-3.5" />
-                        <span>تحميل</span>
+                        <span>تحميل مباشر</span>
                       </a>
                     </div>
                   </div>
@@ -625,8 +627,10 @@ if __name__ == '__main__':
                       {ep.files.map((epFile, fIdx) => (
                         <a
                           key={fIdx}
-                          href={epFile.proxy_url}
+                          href={epFile.direct_url || epFile.proxy_url}
                           download={epFile.filename}
+                          target="_blank"
+                          rel="noopener noreferrer"
                           className="flex-1 text-center py-1.5 px-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-[11px] font-mono font-semibold text-neutral-200 border border-neutral-700/60 transition"
                         >
                           {epFile.quality} ({epFile.size || 'تحميل'})

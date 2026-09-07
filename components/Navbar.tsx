@@ -24,12 +24,14 @@ import {
 import { useAuth } from '@/contexts/AuthContext';
 import { useWatchlist } from '@/contexts/WatchlistContext';
 import { CATEGORIES } from '@/lib/catalog-data';
+import { useIsMounted } from '@/hooks/use-mounted';
 
 export default function Navbar() {
   const router = useRouter();
   const pathname = usePathname();
   const { currentUser, signInWithGoogle, logout } = useAuth();
   const { watchlist } = useWatchlist();
+  const mounted = useIsMounted();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [isCategoriesOpen, setIsCategoriesOpen] = useState(false);
@@ -230,7 +232,7 @@ export default function Navbar() {
             >
               <Bookmark className="w-4 h-4 text-red-500" />
               <span>قائمتي</span>
-              {watchlist.length > 0 && (
+              {mounted && watchlist.length > 0 && (
                 <span
                   id="watchlist-badge-count"
                   className="px-1.5 py-0.2 text-[11px] rounded-full bg-red-600 text-white font-bold"
@@ -437,7 +439,7 @@ export default function Navbar() {
               className="p-2.5 rounded-xl bg-neutral-900 text-neutral-200 flex items-center justify-center gap-1.5"
             >
               <Bookmark className="w-3.5 h-3.5 text-red-500" />
-              <span>قائمتي ({watchlist.length})</span>
+              <span>قائمتي {mounted && watchlist.length > 0 ? `(${watchlist.length})` : ''}</span>
             </Link>
             <Link
               href="/linkgrabber"

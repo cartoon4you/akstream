@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useSyncExternalStore } from 'react';
 import {
   collection,
   doc,
@@ -33,19 +33,59 @@ const WatchlistContext = createContext<WatchlistContextType>({
 
 const LOCAL_STORAGE_KEY = 'akwam_guest_watchlist_v1';
 
+let memoryWatchlist: WatchlistItem[] = [];
+let lastRawJson = '';
+const listeners = new Set<() => void>();
+
+function getGuestSnapshot(): WatchlistItem[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const saved = localStorage.getItem(LOCAL_STORAGE_KEY) || '[]';
+    if (saved !== lastRawJson) {
+      lastRawJson = saved;
+      memoryWatchlist = JSON.parse(saved);
+    }
+  } catch {
+    memoryWatchlist = [];
+  }
+  return memoryWatchlist;
+}
+
+const emptySnapshot: WatchlistItem[] = [];
+function getServerSnapshot(): WatchlistItem[] {
+  return emptySnapshot;
+}
+
+function subscribeGuest(callback: () => void) {
+  listeners.add(callback);
+  const handleStorage = (e: StorageEvent) => {
+    if (e.key === LOCAL_STORAGE_KEY) {
+      callback();
+    }
+  };
+  window.addEventListener('storage', handleStorage);
+  return () => {
+    listeners.delete(callback);
+    window.removeEventListener('storage', handleStorage);
+  };
+}
+
+function emitGuestChange(newItems: WatchlistItem[]) {
+  try {
+    const raw = JSON.stringify(newItems);
+    lastRawJson = raw;
+    memoryWatchlist = newItems;
+    localStorage.setItem(LOCAL_STORAGE_KEY, raw);
+  } catch {
+    // ignore
+  }
+  listeners.forEach((l) => l());
+}
+
 export function WatchlistProvider({ children }: { children: React.ReactNode }) {
   const { currentUser } = useAuth();
-  const [watchlist, setWatchlist] = useState<WatchlistItem[]>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem(LOCAL_STORAGE_KEY);
-        if (saved) return JSON.parse(saved);
-      } catch {
-        return [];
-      }
-    }
-    return [];
-  });
+  const guestWatchlist = useSyncExternalStore(subscribeGuest, getGuestSnapshot, getServerSnapshot);
+  const [firestoreWatchlist, setFirestoreWatchlist] = useState<WatchlistItem[]>([]);
   const [loading, setLoading] = useState(false);
 
   // 1. Sync from Firestore when user is logged in
@@ -64,7 +104,7 @@ export function WatchlistProvider({ children }: { children: React.ReactNode }) {
         snapshot.forEach((docSnap) => {
           items.push(docSnap.data() as WatchlistItem);
         });
-        setWatchlist(items);
+        setFirestoreWatchlist(items);
         setLoading(false);
 
         // Also if guest had items in localStorage, offer to sync them to Firestore
@@ -81,6 +121,9 @@ export function WatchlistProvider({ children }: { children: React.ReactNode }) {
                 });
               });
               localStorage.removeItem(LOCAL_STORAGE_KEY);
+              lastRawJson = '';
+              memoryWatchlist = [];
+              listeners.forEach((l) => l());
             }
           }
         } catch {
@@ -89,11 +132,14 @@ export function WatchlistProvider({ children }: { children: React.ReactNode }) {
       },
       (error) => {
         handleFirestoreError(error, OperationType.GET, watchlistColPath);
+        setLoading(false);
       }
     );
 
     return () => unsubscribe();
   }, [currentUser]);
+
+  const watchlist = currentUser ? firestoreWatchlist : guestWatchlist;
 
   const addToWatchlist = async (item: MediaItem | WatchlistItem) => {
     const watchItem: WatchlistItem = {
@@ -116,14 +162,8 @@ export function WatchlistProvider({ children }: { children: React.ReactNode }) {
         handleFirestoreError(error, OperationType.WRITE, docPath);
       }
     } else {
-      // Local storage fallback
-      const updated = [...watchlist.filter((i) => i.id !== item.id), watchItem];
-      setWatchlist(updated);
-      try {
-        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
-      } catch {
-        // ignore storage error
-      }
+      const updated = [...guestWatchlist.filter((i) => i.id !== item.id), watchItem];
+      emitGuestChange(updated);
     }
   };
 
@@ -137,13 +177,8 @@ export function WatchlistProvider({ children }: { children: React.ReactNode }) {
         handleFirestoreError(error, OperationType.DELETE, docPath);
       }
     } else {
-      const updated = watchlist.filter((i) => i.id !== itemId);
-      setWatchlist(updated);
-      try {
-        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
-      } catch {
-        // ignore
-      }
+      const updated = guestWatchlist.filter((i) => i.id !== itemId);
+      emitGuestChange(updated);
     }
   };
 

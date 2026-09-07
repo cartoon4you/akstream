@@ -14,7 +14,7 @@ interface UpstreamResult {
 }
 
 /**
- * Robust Upstream Fetcher (Fixed for Akwam / Downet CDNs)
+ * Robust Upstream Fetcher (Optimized for Akwam / Downet CDNs)
  */
 function fetchUpstream(
   targetUrl: string,
@@ -27,22 +27,22 @@ function fetchUpstream(
       const isHttps = parsedUrl.protocol === 'https:';
       const client = isHttps ? https : http;
 
-      // استنساخ الهيدرز لتجنب التعديل على الكائن الأصلي أثناء التوجيه المتكرر
-      const activeHeaders = { ...baseHeaders };
-      
-      // ضروري جداً: تحديث حقل الـ Host ليتوافق مع السيرفر الحالي الذي يتم جلب البيانات منه
-      activeHeaders['Host'] = parsedUrl.host;
+      // تحديث هيدر Host ليتطابق دائماً مع الخادم الهدف
+      const activeHeaders = { 
+        ...baseHeaders,
+        Host: parsedUrl.host 
+      };
 
       const req = client.request(
         targetUrl,
         {
           method: 'GET',
           headers: activeHeaders,
-          rejectUnauthorized: false, // لتخطي مشاكل شهادات الـ SSL في السيرفرات الفرعية
+          rejectUnauthorized: false, // تجاوز مشاكل SSL على الخوادم الفرعية
           timeout: 35000,
         },
         (res) => {
-          // التعامل الصحيح مع الـ Redirects وتحديث الرابط
+          // التعامل مع إعادة التوجيه (Redirects)
           if (
             res.statusCode &&
             [301, 302, 303, 307, 308].includes(res.statusCode) &&
@@ -50,11 +50,12 @@ function fetchUpstream(
             maxRedirects > 0
           ) {
             const redirectUrl = new URL(res.headers.location, targetUrl).toString();
-            res.resume(); // تحرير المقابس (Sockets) لعدم تجميد السيرفر
             
-            // عند الانتقال لرابط جديد، نحدث الـ Referer والـ Origin إذا لزم الأمر
+            // تحرير مقبس الاتصال (Socket) لتجنب تسريب الذاكرة
+            res.resume();
+
             const updatedHeaders = { ...baseHeaders };
-            updatedHeaders['Referer'] = targetUrl; 
+            updatedHeaders['Referer'] = targetUrl;
 
             return fetchUpstream(redirectUrl, updatedHeaders, maxRedirects - 1)
               .then(resolve)
@@ -70,7 +71,7 @@ function fetchUpstream(
       );
 
       req.on('timeout', () => {
-        req.destroy(new Error('انتهت مهلة جلب الفيديو من سيرفر أكوام (Timeout)'));
+        req.destroy(new Error('انتهت مهلة جلب الفيديو من السيرفر المصدر (Timeout)'));
       });
 
       req.on('error', (err) => {
@@ -94,8 +95,9 @@ export async function GET(request: NextRequest) {
     });
   }
 
+  let parsedTarget: URL;
   try {
-    new URL(videoUrl);
+    parsedTarget = new URL(videoUrl);
   } catch {
     return new Response(JSON.stringify({ error: 'صيغة الرابط غير صحيحة' }), {
       status: 400,
@@ -103,22 +105,64 @@ export async function GET(request: NextRequest) {
     });
   }
 
+  // التحقق من النطاقات المسموح بها إذا تم تحديد STREAM_ALLOWED_HOSTS
+  const allowedHostsStr = process.env.STREAM_ALLOWED_HOSTS;
+  if (allowedHostsStr) {
+    const allowedHosts = allowedHostsStr
+      .split(',')
+      .map((h) => h.trim().toLowerCase())
+      .filter(Boolean);
+
+    if (allowedHosts.length > 0) {
+      const targetHost = parsedTarget.hostname.toLowerCase();
+      const isAllowed = allowedHosts.some((allowed) => {
+        if (allowed.startsWith('.')) {
+          return targetHost.endsWith(allowed) || targetHost === allowed.slice(1);
+        }
+        return targetHost === allowed || targetHost.endsWith(`.${allowed}`);
+      });
+
+      if (!isAllowed) {
+        return new Response(
+          JSON.stringify({
+            error: `النطاق ${targetHost} غير مسموح به في إعدادات البث (STREAM_ALLOWED_HOSTS)`,
+          }),
+          {
+            status: 403,
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
+      }
+    }
+  }
+
   try {
     const rangeHeader = request.headers.get('range');
-    const parsedTarget = new URL(videoUrl);
 
-    // بناء هيدرز مطابقة تماماً للمتصفح الحقيقي لإقناع الـ CDN بأن الطلب شرعي
+    const userAgent =
+      process.env.SCRAPER_USER_AGENT ||
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
+
+    const baseUrl = process.env.AKWAM_BASE_URL || 'https://akwam.ss';
+    let origin = 'https://akwam.ss';
+    try {
+      origin = new URL(baseUrl).origin;
+    } catch {
+      // fallback
+    }
+
+    // بناء الهيدرز المطلوبة للمطابقة مع طلبات المتصفح الشائعة
     const headersToSend: Record<string, string> = {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+      'User-Agent': userAgent,
       'Accept': 'video/webm,video/ogg,video/*;q=0.9,application/ogg;q=0.7,audio/*;q=0.6,*/*;q=0.5',
       'Accept-Language': 'ar,en-US;q=0.9,en;q=0.8',
-      'Accept-Encoding': 'identity', // تمنع السيرفر من ضغط الملف بالـ Gzip لكي تعمل حسابات الـ Byte Ranges بدقة
+      'Accept-Encoding': 'identity', // إلغاء الضغط لضبط حسابات Byte Ranges
       'Connection': 'keep-alive',
       'Sec-Fetch-Dest': 'video',
       'Sec-Fetch-Mode': 'cors',
       'Sec-Fetch-Site': 'cross-site',
-      'Referer': 'https://akwam.ss/', // ضروري لتخطي حماية أكوام وسيرفر داونيت
-      'Origin': 'https://akwam.ss'
+      'Referer': `${origin}/`,
+      'Origin': origin,
     };
 
     if (rangeHeader) {
@@ -130,18 +174,22 @@ export async function GET(request: NextRequest) {
       headersToSend
     );
 
-    // إلغاء عملية الدفق من السيرفر الأصلي فوراً إذا قام المستخدم بقفل الصفحة أو تقديم الفيديو
+    // إلغاء الدفق فور إغلاق المستخدم للمشغل أو الخروج من الصفحة
     if (request.signal) {
-      request.signal.addEventListener('abort', () => {
-        try {
-          stream.destroy();
-        } catch {
-          // ignore
-        }
-      });
+      if (request.signal.aborted) {
+        stream.destroy();
+      } else {
+        request.signal.addEventListener('abort', () => {
+          try {
+            stream.destroy();
+          } catch {
+            // Ignore stream destruction error
+          }
+        });
+      }
     }
 
-    // تحديد نوع محتوى الفيديو (Mime-Type) تلقائياً
+    // تحديد نوع المحتوى تلقائياً
     let contentType = upstreamHeaders['content-type'] as string | undefined;
     const lowerUrl = videoUrl.toLowerCase();
     if (!contentType || contentType === 'application/octet-stream') {
@@ -152,7 +200,7 @@ export async function GET(request: NextRequest) {
       else contentType = 'video/mp4';
     }
 
-    // بناء هيدرز الاستجابة المتوافقة مع CORS والـ المشغلات الحديثة (HTML5 Players)
+    // تجهيز الهيدرز المتوافقة مع CORS والـ HTML5 Players
     const responseHeaders = new Headers();
     responseHeaders.set('Access-Control-Allow-Origin', '*');
     responseHeaders.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
@@ -160,7 +208,7 @@ export async function GET(request: NextRequest) {
     responseHeaders.set('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges, Content-Type');
     responseHeaders.set('Accept-Ranges', 'bytes');
     responseHeaders.set('Content-Type', contentType);
-    responseHeaders.set('Cache-Control', 'no-cache, no-store, must-revalidate'); // يفضل عدم عمل كاش لروابط التحميل المؤقتة
+    responseHeaders.set('Cache-Control', 'no-cache, no-store, must-revalidate');
 
     if (upstreamHeaders['content-length']) {
       responseHeaders.set('Content-Length', String(upstreamHeaders['content-length']));
@@ -170,9 +218,8 @@ export async function GET(request: NextRequest) {
       responseHeaders.set('Content-Range', String(upstreamHeaders['content-range']));
     }
 
-    // تحويل الـ Node Stream إلى Web Readable Stream متوافق مع Next.js Edge response
-    // @ts-expect-error Node.js Readable.toWeb supported
-    const webStream = Readable.toWeb(stream);
+    // تحويل ReadableStream من Node.js إلى Web Readable Stream
+    const webStream = Readable.toWeb(stream) as ReadableStream;
 
     return new Response(webStream, {
       status: statusCode,
