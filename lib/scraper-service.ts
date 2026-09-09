@@ -113,7 +113,7 @@ function parseEntryBoxes($: cheerio.CheerioAPI, defaultType: 'movie' | 'series' 
       id,
       title,
       poster: poster || 'https://images.unsplash.com/photo-1534447677768-be436bb09401?w=600',
-      story: `شاهد الآن ${title} (${year}) بجودة عالية وسيرفرات مشاهدة وتحميل مباشرة على منصة أكوام.`,
+      story: `شاهد الآن ${title} (${year}) بجودة عالية وسيرفرات مشاهدة وتحميل مباشرة على منصة يمن فلکس.`,
       rating,
       year,
       category: isSeries ? 'arabic-series' : 'foreign-movies',
@@ -122,7 +122,7 @@ function parseEntryBoxes($: cheerio.CheerioAPI, defaultType: 'movie' | 'series' 
       genres: genres.length > 0 ? genres : ['أكشن', 'دراما'],
       servers: [
         {
-          name: 'سيرفر أكوام الرئيسي 1080p FHD',
+          name: 'سيرفر يمن فلکس الرئيسي 1080p FHD',
           quality: 1080,
           url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
           referer: 'https://akwam.ss/',
@@ -603,7 +603,7 @@ export async function deepCrawlTargetPage(targetInput: string): Promise<LinkGrab
   const cleanPath = targetUrl.replace(BASE_URL, '');
   const mediaDetails = await getMediaDetails(cleanPath);
 
-  const title = mediaDetails?.title || 'فيديو أكوام';
+  const title = mediaDetails?.title || 'فيديو يمن فلکس';
   const poster = mediaDetails?.poster;
   const isSeries = mediaDetails?.type === 'series';
 

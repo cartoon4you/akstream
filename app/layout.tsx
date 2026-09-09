@@ -18,25 +18,25 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: 'Akwam Stream - أكوام سينما لمشاهدة الأفلام والمسلسلات',
+  title: 'يمن فلکس YemenFlex - منصة مشاهدة أحدث الأفلام والمسلسلات',
   description:
-    'منصة مشاهدة الأفلام والمسلسلات مع جودات متعددة وفلترة حسب الأقسام وقائمة مشاهدة سحابية متزامنة.',
+    'يمن فلکس (YemenFlex) - منصة مشاهدة الأفلام والمسلسلات مع جودات متعددة وسيرفرات سريعة وقائمة مشاهدة سحابية متزامنة.',
   appleWebApp: {
     capable: true,
     statusBarStyle: 'black-translucent',
-    title: 'Akwam Stream',
+    title: 'يمن فلکس YemenFlex',
   },
   openGraph: {
-    title: 'Akwam Stream - أكوام سينما لمشاهدة الأفلام والمسلسلات',
+    title: 'يمن فلکس YemenFlex - منصة مشاهدة أحدث الأفلام والمسلسلات',
     description:
-      'منصة مشاهدة الأفلام والمسلسلات مع جودات متعددة وفلترة حسب الأقسام وقائمة مشاهدة سحابية متزامنة.',
+      'يمن فلکس (YemenFlex) - منصة مشاهدة الأفلام والمسلسلات مع جودات متعددة وسيرفرات سريعة وقائمة مشاهدة سحابية متزامنة.',
     type: 'website',
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Akwam Stream - أكوام سينما',
+    title: 'يمن فلکس YemenFlex',
     description:
-      'منصة مشاهدة الأفلام والمسلسلات مع جودات متعددة وفلترة حسب الأقسام وقائمة مشاهدة سحابية.',
+      'يمن فلکس (YemenFlex) - منصة مشاهدة الأفلام والمسلسلات مع جودات متعددة وسيرفرات سريعة.',
   },
 };
 
@@ -75,8 +75,8 @@ export default function RootLayout({
                     <Film className="w-4 h-4" />
                   </div>
                   <div>
-                    <span className="text-sm font-bold text-white">أكوام ستريم (AKWAM STREAM)</span>
-                    <p className="text-[11px] text-neutral-400">بث فائق الجودة، سيرفرات متعددة، وبدون إعلانات مزعجة.</p>
+                    <span className="text-sm font-bold text-white">يمن فلکس (YemenFlex)</span>
+                    <p className="text-[11px] text-neutral-400">بث فائق الجودة، سيرفرات سريعة، وبدون إعلانات مزعجة.</p>
                   </div>
                 </div>
 

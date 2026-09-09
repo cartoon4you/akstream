@@ -30,7 +30,7 @@ export const SAMPLE_CATALOG: MediaItem[] = [
     isTrending: true,
     servers: [
       {
-        name: 'سيرفر أكوام VIP (1080p FHD)',
+        name: 'سيرفر يمن فلکس VIP (1080p FHD)',
         quality: 1080,
         url: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/TearsOfSteel.mp4',
         referer: 'https://akwam.ss/',

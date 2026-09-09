@@ -52,7 +52,7 @@ function SearchContent() {
       {/* Search Header & Bar */}
       <div className="max-w-2xl mx-auto text-center space-y-4">
         <h1 className="text-2xl sm:text-3xl font-extrabold text-white">
-          البحث في مكتبة أكوام
+          البحث في مكتبة يمن فلکس
         </h1>
         <form onSubmit={handleSearchSubmit} className="relative">
           <input

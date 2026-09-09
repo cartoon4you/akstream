@@ -121,10 +121,10 @@ export default function Navbar() {
             </div>
             <div className="flex flex-col">
               <span className="text-xl font-extrabold tracking-wide text-white group-hover:text-red-500 transition">
-                أكوام <span className="text-red-500">سينما</span>
+                يمن <span className="text-red-500">فلکس</span>
               </span>
               <span className="text-[10px] text-neutral-400 -mt-1 font-mono tracking-wider">
-                AKWAM STREAM
+                YemenFlex
               </span>
             </div>
           </Link>
