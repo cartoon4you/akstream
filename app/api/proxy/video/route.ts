@@ -229,7 +229,8 @@ export async function GET(request: NextRequest) {
     responseHeaders.set('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Accept-Ranges, Content-Type');
     responseHeaders.set('Accept-Ranges', 'bytes');
     responseHeaders.set('Content-Type', contentType);
-    responseHeaders.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+    // تمكين التخزين المؤقت في المتصفح لدعم ميزة التحميل المسبق فائقة السرعة (Preload Caching)
+    responseHeaders.set('Cache-Control', 'public, max-age=86400, stale-while-revalidate=604800');
 
     if (upstreamHeaders['content-length']) {
       responseHeaders.set('Content-Length', String(upstreamHeaders['content-length']));

@@ -1,22 +1,61 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import Link from 'next/link';
-import { Play, Bookmark, Star, ChevronLeft, ChevronRight, Check, Sparkles } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Play, Bookmark, Star, ChevronLeft, ChevronRight, Check, Sparkles, Zap } from 'lucide-react';
 import { MediaItem } from '@/lib/types';
 import { useWatchlist } from '@/contexts/WatchlistContext';
+import { preloadImage, preloadVideoChunk, preloadMediaDetails } from '@/lib/preload-manager';
 
 interface HeroSliderProps {
   items: MediaItem[];
 }
 
 export default function HeroSlider({ items }: HeroSliderProps) {
+  const router = useRouter();
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
   const [touchStartX, setTouchStartX] = useState<number | null>(null);
   const { isInWatchlist, addToWatchlist, removeFromWatchlist } = useWatchlist();
 
-  const slides = items && items.length > 0 ? items : [];
+  const slides = useMemo(() => (items && items.length > 0 ? items : []), [items]);
+  const current = slides[currentIndex] || null;
+  const saved = current ? isInWatchlist(current.id) : false;
+
+  const handleWarmWatch = useCallback(() => {
+    if (!current) return;
+    router.prefetch(`/watch?id=${encodeURIComponent(current.id)}`);
+    preloadMediaDetails(current.id);
+    if (current.servers?.[0]?.url) {
+      preloadVideoChunk(current.servers[0].url, current.servers[0].referer);
+    }
+  }, [current, router]);
+
+  // Predictive Preloading: Preload the next & previous slide images and current video stream
+  useEffect(() => {
+    if (slides.length === 0) return;
+
+    const currentItem = slides[currentIndex];
+    const nextItem = slides[(currentIndex + 1) % slides.length];
+    const prevItem = slides[(currentIndex - 1 + slides.length) % slides.length];
+
+    // Preload adjacent slide backdrops immediately
+    if (nextItem?.banner || nextItem?.poster) {
+      preloadImage(nextItem.banner || nextItem.poster, 'high');
+    }
+    if (prevItem?.banner || prevItem?.poster) {
+      preloadImage(prevItem.banner || prevItem.poster, 'auto');
+    }
+
+    // Preload current slide's video and watch details in the background
+    if (currentItem) {
+      preloadMediaDetails(currentItem.id);
+      if (currentItem.servers?.[0]?.url) {
+        preloadVideoChunk(currentItem.servers[0].url, currentItem.servers[0].referer);
+      }
+    }
+  }, [currentIndex, slides]);
 
   // Auto rotate slides every 6 seconds unless paused
   useEffect(() => {
@@ -27,10 +66,7 @@ export default function HeroSlider({ items }: HeroSliderProps) {
     return () => clearInterval(interval);
   }, [slides.length, isPaused]);
 
-  if (slides.length === 0) return null;
-
-  const current = slides[currentIndex];
-  const saved = isInWatchlist(current.id);
+  if (slides.length === 0 || !current) return null;
 
   const prevSlide = () => {
     setCurrentIndex((prev) => (prev - 1 + slides.length) % slides.length);
@@ -153,6 +189,9 @@ export default function HeroSlider({ items }: HeroSliderProps) {
             <Link
               href={`/watch?id=${encodeURIComponent(current.id)}`}
               id="hero-watch-now-btn"
+              onMouseEnter={handleWarmWatch}
+              onTouchStart={handleWarmWatch}
+              onFocus={handleWarmWatch}
               className="flex items-center justify-center gap-2 px-5 sm:px-6 py-3 min-h-[44px] rounded-xl bg-red-600 hover:bg-red-700 active:scale-95 text-white font-bold text-xs sm:text-sm shadow-xl shadow-red-950/40 transition flex-1 sm:flex-initial"
             >
               <Play className="w-4 sm:w-5 h-4 sm:h-5 fill-white translate-x-0.5" />

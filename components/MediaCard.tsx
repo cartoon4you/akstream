@@ -1,18 +1,60 @@
 'use client';
 
-import React from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Star, Bookmark, Play, Check } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Star, Bookmark, Play, Check, Zap } from 'lucide-react';
 import { MediaItem } from '@/lib/types';
 import { useWatchlist } from '@/contexts/WatchlistContext';
+import { preloadImage, preloadVideoChunk, preloadMediaDetails } from '@/lib/preload-manager';
 
 interface MediaCardProps {
   item: MediaItem;
 }
 
 export default function MediaCard({ item }: MediaCardProps) {
+  const router = useRouter();
+  const cardRef = useRef<HTMLDivElement>(null);
+  const [imageLoaded, setImageLoaded] = useState(false);
   const { isInWatchlist, addToWatchlist, removeFromWatchlist } = useWatchlist();
   const saved = isInWatchlist(item.id);
+
+  // 1. Viewport Anticipation: Preload poster as soon as the card is within 250px of the viewport
+  useEffect(() => {
+    const cardEl = cardRef.current;
+    if (!cardEl || !item.poster || typeof IntersectionObserver === 'undefined') return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          preloadImage(item.poster, 'auto');
+          observer.disconnect();
+        }
+      },
+      { rootMargin: '250px' }
+    );
+
+    observer.observe(cardEl);
+    return () => observer.disconnect();
+  }, [item.poster]);
+
+  // 2. Hover / Touch Interaction Preloading (Warm up Watch Page & Video Chunks)
+  const handleInteractionPreload = () => {
+    // A. Preload the Watch Route in Next.js
+    router.prefetch(`/watch?id=${encodeURIComponent(item.id)}`);
+
+    // B. Preload high priority poster and backdrop
+    if (item.poster) preloadImage(item.poster, 'high');
+    if (item.banner) preloadImage(item.banner, 'auto');
+
+    // C. Preload video chunk of primary server if known
+    if (item.servers && item.servers.length > 0 && item.servers[0]?.url) {
+      preloadVideoChunk(item.servers[0].url, item.servers[0].referer);
+    }
+
+    // D. Preload complete watch details via API
+    preloadMediaDetails(item.id);
+  };
 
   const handleWatchlistClick = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -26,16 +68,31 @@ export default function MediaCard({ item }: MediaCardProps) {
 
   return (
     <div
+      ref={cardRef}
       id={`media-card-${item.id}`}
+      onMouseEnter={handleInteractionPreload}
+      onTouchStart={handleInteractionPreload}
+      onFocus={handleInteractionPreload}
       className="group relative flex flex-col rounded-2xl overflow-hidden bg-neutral-900/80 border border-neutral-800/80 transition-all duration-300 hover:-translate-y-1.5 hover:border-red-600/50 hover:shadow-xl hover:shadow-red-950/20"
       dir="rtl"
     >
       <Link href={`/watch?id=${encodeURIComponent(item.id)}`} className="block relative aspect-[2/3] w-full overflow-hidden bg-neutral-950">
+        {/* Placeholder skeleton while loading */}
+        {!imageLoaded && (
+          <div className="absolute inset-0 bg-neutral-900/90 animate-pulse flex items-center justify-center">
+            <Zap className="w-5 h-5 text-neutral-700 animate-bounce" />
+          </div>
+        )}
+
         <img
           src={item.poster || 'https://images.unsplash.com/photo-1534447677768-be436bb09401?w=600'}
           alt={item.title}
           loading="lazy"
-          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+          decoding="async"
+          onLoad={() => setImageLoaded(true)}
+          className={`w-full h-full object-cover transition-all duration-500 group-hover:scale-105 ${
+            imageLoaded ? 'opacity-100' : 'opacity-0'
+          }`}
         />
 
         {/* Gradient Overlay */}
@@ -83,6 +140,7 @@ export default function MediaCard({ item }: MediaCardProps) {
         <div>
           <Link
             href={`/watch?id=${encodeURIComponent(item.id)}`}
+            onMouseEnter={handleInteractionPreload}
             className="block text-xs sm:text-sm font-bold text-neutral-100 hover:text-red-500 transition line-clamp-1 leading-snug"
           >
             {item.title}
@@ -104,3 +162,4 @@ export default function MediaCard({ item }: MediaCardProps) {
     </div>
   );
 }
+

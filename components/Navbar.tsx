@@ -25,6 +25,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useWatchlist } from '@/contexts/WatchlistContext';
 import { CATEGORIES } from '@/lib/catalog-data';
 import { useIsMounted } from '@/hooks/use-mounted';
+import PreloadSpeedBadge from '@/components/PreloadSpeedBadge';
 
 export default function Navbar() {
   const router = useRouter();
@@ -258,8 +259,10 @@ export default function Navbar() {
           </nav>
         </div>
 
-        {/* Right Side: Search & User Account */}
-        <div className="flex items-center gap-3">
+        {/* Right Side: Search & User Account & Preload Speed Turbo */}
+        <div className="flex items-center gap-2.5 sm:gap-3">
+          <PreloadSpeedBadge />
+
           {/* Search Form (Desktop) */}
           <form
             onSubmit={handleSearchSubmit}

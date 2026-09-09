@@ -53,6 +53,8 @@ export default function RootLayout({
         <meta name="apple-touch-fullscreen" content="yes" />
 
         {/* Connection Warming for Media Delivery & CDN Domains */}
+        <link rel="preconnect" href="https://images.unsplash.com" crossOrigin="anonymous" />
+        <link rel="dns-prefetch" href="https://images.unsplash.com" />
         <link rel="preconnect" href="https://downet.net" crossOrigin="anonymous" />
         <link rel="dns-prefetch" href="https://downet.net" />
         <link rel="preconnect" href="https://img.downet.net" crossOrigin="anonymous" />

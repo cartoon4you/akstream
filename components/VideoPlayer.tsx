@@ -21,6 +21,7 @@ import {
   Download,
 } from 'lucide-react';
 import { ServerOption } from '@/lib/types';
+import { preloadVideoChunk } from '@/lib/preload-manager';
 
 interface VideoPlayerProps {
   servers: ServerOption[];
@@ -156,7 +157,12 @@ export default function VideoPlayer({
     if (isHls && Hls.isSupported()) {
       const hls = new Hls({
         enableWorker: true,
-        lowLatencyMode: true,
+        lowLatencyMode: false,
+        maxBufferLength: 60,
+        maxMaxBufferLength: 120,
+        maxBufferSize: 60 * 1024 * 1024,
+        backBufferLength: 30,
+        progressive: true,
       });
       hlsRef.current = hls;
 
@@ -222,6 +228,19 @@ export default function VideoPlayer({
       }
     };
   }, [streamUrl, activeServer, useProxy, proxyOverride, isMkvFormat, safePlay]);
+
+  // Pre-warm alternate server quality streams in background for instant quality switching
+  useEffect(() => {
+    if (!servers || servers.length <= 1) return;
+    const idleTimer = setTimeout(() => {
+      servers.forEach((srv, idx) => {
+        if (idx !== selectedServerIndex && srv?.url) {
+          preloadVideoChunk(srv.url, srv.referer);
+        }
+      });
+    }, 2500);
+    return () => clearTimeout(idleTimer);
+  }, [servers, selectedServerIndex]);
 
   // Seamless Quality Switch preserving exact playback position
   const changeQuality = (index: number) => {
@@ -574,6 +593,7 @@ export default function VideoPlayer({
       >
         <video
           ref={videoRef}
+          preload="auto"
           onClick={togglePlay}
           onDoubleClick={toggleFullscreen}
           onTimeUpdate={handleTimeUpdate}

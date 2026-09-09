@@ -23,6 +23,12 @@ import VideoPlayer from '@/components/VideoPlayer';
 import EpisodesGrid from '@/components/EpisodesGrid';
 import { MediaItem, EpisodeItem, ServerOption } from '@/lib/types';
 import { useWatchlist } from '@/contexts/WatchlistContext';
+import {
+  getCachedMediaDetails,
+  preloadMediaDetails,
+  preloadVideoChunk,
+  preloadImage,
+} from '@/lib/preload-manager';
 
 function WatchContent() {
   const searchParams = useSearchParams();
@@ -41,21 +47,52 @@ function WatchContent() {
   useEffect(() => {
     async function loadMediaDetails() {
       if (!mediaId) return;
-      try {
+
+      // Check client memory cache first for 0ms instantaneous render
+      const cached = getCachedMediaDetails(mediaId);
+      if (cached) {
+        setMedia(cached);
+        if (cached.episodes && cached.episodes.length > 0) {
+          const firstEp = cached.episodes[0];
+          setSelectedEpisode(firstEp);
+          setActiveServers(firstEp.servers && firstEp.servers.length > 0 ? firstEp.servers : cached.servers || []);
+        } else {
+          setActiveServers(cached.servers || []);
+        }
+        setLoading(false);
+      } else {
         setLoading(true);
-        const res = await fetch(`/api/details?id=${encodeURIComponent(mediaId)}`);
+      }
+
+      try {
+        const res = await fetch(`/api/details?id=${encodeURIComponent(mediaId)}`, {
+          cache: 'force-cache',
+        });
         const json = await res.json();
         if (json.success && json.data) {
           const item: MediaItem = json.data;
           setMedia(item);
 
+          // Preload backdrop & poster
+          if (item.banner) preloadImage(item.banner, 'high');
+          if (item.poster) preloadImage(item.poster, 'auto');
+
           if (item.episodes && item.episodes.length > 0) {
-            // Select first episode by default for series
             const firstEp = item.episodes[0];
             setSelectedEpisode(firstEp);
             setActiveServers(firstEp.servers && firstEp.servers.length > 0 ? firstEp.servers : item.servers || []);
+
+            // Preload next episode in background
+            if (item.episodes.length > 1) {
+              const nextEp = item.episodes[1];
+              preloadMediaDetails(nextEp.id);
+            }
           } else {
             setActiveServers(item.servers || []);
+            // Preload primary video chunk
+            if (item.servers && item.servers.length > 0 && item.servers[0]?.url) {
+              preloadVideoChunk(item.servers[0].url, item.servers[0].referer);
+            }
           }
         }
       } catch (error) {
@@ -83,6 +120,10 @@ function WatchContent() {
         if (json.success && json.data?.servers && json.data.servers.length > 0) {
           ep.servers = json.data.servers;
           setActiveServers(json.data.servers);
+          // Preload the primary video chunk of this episode
+          if (json.data.servers[0]?.url) {
+            preloadVideoChunk(json.data.servers[0].url, json.data.servers[0].referer);
+          }
         } else {
           setActiveServers(ep.servers || []);
         }
@@ -91,6 +132,15 @@ function WatchContent() {
         setActiveServers(ep.servers || []);
       } finally {
         setLoadingEpisode(false);
+      }
+    }
+
+    // Predictive Next Episode Preloading for seamless binge-watching
+    if (media?.episodes) {
+      const currentIndex = media.episodes.findIndex((e) => e.id === ep.id);
+      if (currentIndex !== -1 && currentIndex + 1 < media.episodes.length) {
+        const nextEp = media.episodes[currentIndex + 1];
+        preloadMediaDetails(nextEp.id);
       }
     }
 
