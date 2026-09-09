@@ -27,6 +27,7 @@ interface VideoPlayerProps {
   title?: string;
   poster?: string;
   onServerChange?: (server: ServerOption) => void;
+  onRefreshLink?: () => Promise<boolean | void>;
 }
 
 export default function VideoPlayer({
@@ -34,6 +35,7 @@ export default function VideoPlayer({
   title,
   poster,
   onServerChange,
+  onRefreshLink,
 }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -57,7 +59,9 @@ export default function VideoPlayer({
 
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isWindowedFullscreen, setIsWindowedFullscreen] = useState(false);
   const [isTheaterMode, setIsTheaterMode] = useState(false);
+  const isFull = isFullscreen || isWindowedFullscreen;
   const [showControls, setShowControls] = useState(true);
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
   const [proxyOverride, setProxyOverride] = useState<boolean | null>(null);
@@ -70,16 +74,12 @@ export default function VideoPlayer({
     return u.includes('.mkv') || activeServer?.type === 'mkv';
   }, [activeServer]);
 
-  // Automatically route through streaming proxy for Akwam / Downet / protected CDN streams
-  // This bypasses CDN 403 hotlink blocks and provides seamless 206 Partial Content video streaming
+  // Prefer DIRECT client-side playback by default to bypass Cloud Run datacenter proxy latency and IP throttling.
+  // Seamlessly auto-switches to proxy if direct playback encounters hotlink/CORS restrictions.
   const useProxy = useMemo(() => {
     if (proxyOverride !== null) return proxyOverride;
-    const u = (activeServer?.url || '').toLowerCase();
-    if (u.includes('downet.net') || u.includes('akwam') || u.includes('ak.sv') || u.includes('/download/')) {
-      return true;
-    }
     return false;
-  }, [activeServer, proxyOverride]);
+  }, [proxyOverride]);
 
   // Compute final stream URL (direct URL by default without any proxy)
   const streamUrl = useMemo(() => {
@@ -195,8 +195,15 @@ export default function VideoPlayer({
           return;
         }
 
+        // If streaming proxy failed, automatically fallback to direct CDN playback
+        if (useProxy && proxyOverride !== true) {
+          console.warn('Streaming proxy failed; attempting direct playback fallback...');
+          setProxyOverride(false);
+          return;
+        }
+
         setIsLoading(false);
-        setErrorMsg('تعذر تشغيل هذا الرابط مباشرة في المتصفح حالياً. يرجى اختيار جودة أخرى أو إعادة المحاولة أو التحميل المباشر.');
+        setErrorMsg('تعذر تشغيل هذا الرابط حالياً. قد تكون صلاحية رابط البث المؤقت انتهت أو السيرفر محجوب.');
       };
 
       video.addEventListener('canplay', handleCanPlay);
@@ -331,16 +338,126 @@ export default function VideoPlayer({
     setShowSettingsMenu(false);
   };
 
-  const toggleFullscreen = () => {
+  // Cross-browser & Iframe-resilient Fullscreen Toggle
+  const toggleFullscreen = useCallback(async () => {
     const container = containerRef.current;
+    const video = videoRef.current;
     if (!container) return;
 
-    if (!document.fullscreenElement) {
-      container.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {});
-    } else {
-      document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {});
+    // 1. If currently in windowed fullscreen, exit it
+    if (isWindowedFullscreen) {
+      setIsWindowedFullscreen(false);
+      setIsFullscreen(false);
+      document.body.style.overflow = '';
+      return;
     }
-  };
+
+    // 2. If currently in native fullscreen, exit it
+    const doc = document as any;
+    const isNativeFull = !!(
+      doc.fullscreenElement ||
+      doc.webkitFullscreenElement ||
+      doc.mozFullScreenElement ||
+      doc.msFullscreenElement
+    );
+
+    if (isNativeFull) {
+      try {
+        if (doc.exitFullscreen) {
+          await doc.exitFullscreen();
+        } else if (doc.webkitExitFullscreen) {
+          await doc.webkitExitFullscreen();
+        } else if (doc.mozCancelFullScreen) {
+          await doc.mozCancelFullScreen();
+        } else if (doc.msExitFullscreen) {
+          await doc.msExitFullscreen();
+        }
+      } catch (err) {
+        console.warn('Exit native fullscreen error:', err);
+      }
+      setIsFullscreen(false);
+      return;
+    }
+
+    // 3. Attempt Native HTML5 Fullscreen on container
+    const anyContainer = container as any;
+    let nativeSuccess = false;
+    try {
+      if (anyContainer.requestFullscreen) {
+        await anyContainer.requestFullscreen();
+        nativeSuccess = true;
+      } else if (anyContainer.webkitRequestFullscreen) {
+        await anyContainer.webkitRequestFullscreen();
+        nativeSuccess = true;
+      } else if (anyContainer.mozRequestFullScreen) {
+        await anyContainer.mozRequestFullScreen();
+        nativeSuccess = true;
+      } else if (anyContainer.msRequestFullscreen) {
+        await anyContainer.msRequestFullscreen();
+        nativeSuccess = true;
+      }
+    } catch (err) {
+      console.warn('Native container fullscreen rejected (e.g. iframe permission limit or browser policy):', err);
+    }
+
+    if (nativeSuccess) {
+      setIsFullscreen(true);
+      return;
+    }
+
+    // 4. On iOS Safari mobile, attempt webkitEnterFullscreen on video element
+    if (video && (video as any).webkitEnterFullscreen) {
+      try {
+        (video as any).webkitEnterFullscreen();
+        setIsFullscreen(true);
+        return;
+      } catch (err) {
+        console.warn('iOS webkitEnterFullscreen rejected:', err);
+      }
+    }
+
+    // 5. Flawless In-Window Fullscreen fallback (guaranteed to work inside iframes and sandboxes)
+    setIsWindowedFullscreen(true);
+    setIsFullscreen(true);
+    document.body.style.overflow = 'hidden';
+  }, [isWindowedFullscreen]);
+
+  // Fullscreen change listener across browsers
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      const doc = document as any;
+      const isNativeFull = !!(
+        doc.fullscreenElement ||
+        doc.webkitFullscreenElement ||
+        doc.mozFullScreenElement ||
+        doc.msFullscreenElement
+      );
+      if (!isNativeFull && !isWindowedFullscreen) {
+        setIsFullscreen(false);
+      } else if (isNativeFull) {
+        setIsFullscreen(true);
+      }
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+    document.addEventListener('MSFullscreenChange', handleFullscreenChange);
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('MSFullscreenChange', handleFullscreenChange);
+    };
+  }, [isWindowedFullscreen]);
+
+  // Clean up body overflow when unmounting
+  useEffect(() => {
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, []);
 
   // Keyboard navigation shortcuts
   useEffect(() => {
@@ -356,15 +473,20 @@ export default function VideoPlayer({
       } else if (e.code === 'ArrowLeft') {
         if (videoRef.current) videoRef.current.currentTime -= 10;
       } else if (e.code === 'KeyF') {
+        e.preventDefault();
         toggleFullscreen();
       } else if (e.code === 'KeyM') {
         toggleMute();
+      } else if (e.code === 'Escape' && isWindowedFullscreen) {
+        setIsWindowedFullscreen(false);
+        setIsFullscreen(false);
+        document.body.style.overflow = '';
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [togglePlay, toggleMute]);
+  }, [togglePlay, toggleMute, toggleFullscreen, isWindowedFullscreen]);
 
   // Auto-hide controls during mouse inactivity
   const handleMouseMove = () => {
@@ -444,11 +566,16 @@ export default function VideoPlayer({
         id="cinematic-video-player"
         onMouseMove={handleMouseMove}
         onMouseLeave={() => isPlaying && setShowControls(false)}
-        className="relative group aspect-video w-full rounded-2xl overflow-hidden bg-black border border-neutral-800 shadow-2xl select-none"
+        className={`relative group select-none bg-black overflow-hidden transition-all duration-200 ${
+          isFull
+            ? 'fixed inset-0 z-[99999] w-screen h-screen rounded-none border-0'
+            : 'aspect-video w-full rounded-2xl border border-neutral-800 shadow-2xl'
+        }`}
       >
         <video
           ref={videoRef}
           onClick={togglePlay}
+          onDoubleClick={toggleFullscreen}
           onTimeUpdate={handleTimeUpdate}
           onLoadedMetadata={handleLoadedMetadata}
           onPlay={() => setIsPlaying(true)}
@@ -456,10 +583,36 @@ export default function VideoPlayer({
           onWaiting={() => setIsLoading(true)}
           onPlaying={() => setIsLoading(false)}
           poster={poster}
+          autoPlay
           playsInline
           muted={isMuted}
           className="w-full h-full object-contain cursor-pointer"
         />
+
+        {/* Floating Top Bar in Fullscreen Mode */}
+        {isFull && (
+          <div
+            className={`absolute top-0 inset-x-0 z-40 flex items-center justify-between pointer-events-auto transition-opacity duration-300 pt-[max(1rem,env(safe-area-inset-top))] px-4 sm:px-6 ${
+              showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'
+            }`}
+            dir="rtl"
+          >
+            <div className="flex items-center gap-2.5 bg-neutral-900/90 backdrop-blur-md px-3.5 py-2 rounded-xl border border-neutral-700/70 text-xs text-white shadow-xl">
+              <span className="w-2.5 h-2.5 rounded-full bg-red-600 animate-pulse" />
+              <span className="font-semibold max-w-[200px] sm:max-w-md truncate">{title || 'مشغل الفيديو'}</span>
+            </div>
+            <button
+              type="button"
+              onClick={toggleFullscreen}
+              className="flex items-center gap-2 px-4 py-2 min-h-[44px] rounded-xl bg-neutral-900/90 hover:bg-neutral-800 backdrop-blur-md text-xs font-bold text-white border border-neutral-700/80 shadow-2xl transition active:scale-95 cursor-pointer"
+              title="خروج من ملء الشاشة (Esc)"
+            >
+              <Minimize className="w-4 h-4 text-red-500" />
+              <span className="hidden sm:inline">خروج من ملء الشاشة (Esc)</span>
+              <span className="sm:hidden">خروج</span>
+            </button>
+          </div>
+        )}
 
         {/* Loading Spinner */}
         {isLoading && (
@@ -474,7 +627,7 @@ export default function VideoPlayer({
             <button
               type="button"
               onClick={handleUnmute}
-              className="flex items-center gap-2 px-4 py-2 rounded-2xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold shadow-2xl shadow-red-950/80 border border-red-400/40 backdrop-blur-md transition-all active:scale-95"
+              className="flex items-center gap-2 px-4 py-2 rounded-2xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold shadow-2xl shadow-red-950/80 border border-red-400/40 backdrop-blur-md transition-all active:scale-95 cursor-pointer"
             >
               <VolumeX className="w-4 h-4 text-white" />
               <span>الصوت مكتوم تلقائياً — انقر لتفعيل الصوت (Unmute)</span>
@@ -488,13 +641,13 @@ export default function VideoPlayer({
             <button
               type="button"
               onClick={handleUnmute}
-              className="w-20 h-20 rounded-full bg-red-600 hover:bg-red-500 hover:scale-105 active:scale-95 text-white flex items-center justify-center shadow-2xl transition mb-4 border-2 border-white/20"
+              className="w-20 h-20 rounded-full bg-red-600 hover:bg-red-500 hover:scale-105 active:scale-95 text-white flex items-center justify-center shadow-2xl transition mb-4 border-2 border-white/20 cursor-pointer"
             >
               <Play className="w-10 h-10 fill-white translate-x-1" />
             </button>
             <h3 className="text-lg font-bold text-white mb-1">انقر لبدء المشاهدة وتشغيل الصوت</h3>
             <p className="text-xs text-neutral-400 max-w-sm">
-              تم إيقاف التشغيل مؤقتاً للامتثال لسياسة متصفحك. الضغط هنا يتيح بدء البث والصوت فوراً.
+              تم إيقاف التشغيل مؤقتاً لامتثال سياسة المتصفح. الضغط هنا يبدأ تشغيل الفيديو والصوت فوراً.
             </p>
           </div>
         )}
@@ -502,10 +655,34 @@ export default function VideoPlayer({
         {/* 3. Error Notice */}
         {errorMsg && (
           <div className="absolute inset-0 flex flex-col items-center justify-center bg-neutral-950/95 backdrop-blur-xl p-6 sm:p-8 text-center z-30 border border-neutral-800/80 rounded-2xl shadow-2xl transition-all duration-300 select-none">
-            <p className="text-sm sm:text-base font-semibold text-neutral-200 mb-4 max-w-md leading-relaxed drop-shadow">
+            <div className="w-12 h-12 rounded-full bg-red-600/20 text-red-500 flex items-center justify-center mb-3">
+              <AlertTriangle className="w-6 h-6" />
+            </div>
+            <p className="text-sm sm:text-base font-semibold text-neutral-200 mb-2 max-w-md leading-relaxed drop-shadow">
               {errorMsg}
             </p>
-            <div className="flex flex-wrap items-center justify-center gap-3">
+            <p className="text-xs text-neutral-400 mb-5 max-w-sm">
+              يمكنك تحديث رابط البث المؤقت، أو التبديل بين النمط المباشر ونمط الوسيط، أو التحميل المباشر.
+            </p>
+            <div className="flex flex-wrap items-center justify-center gap-2.5">
+              {onRefreshLink && (
+                <button
+                  type="button"
+                  onClick={async () => {
+                    setErrorMsg(null);
+                    setIsLoading(true);
+                    const refreshed = await onRefreshLink();
+                    if (!refreshed) {
+                      setIsLoading(false);
+                      setErrorMsg('تعذر تجديد الرابط تلقائياً. يرجى تجربة سيرفر آخر أو التحميل المباشر.');
+                    }
+                  }}
+                  className="px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 active:scale-95 text-xs sm:text-sm font-bold text-white shadow-xl transition-all duration-200 flex items-center justify-center gap-2 border border-red-500/80 cursor-pointer"
+                >
+                  <RotateCw className="w-4 h-4" />
+                  <span>تحديث رابط البث واستئناف المشاهدة</span>
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => {
@@ -516,18 +693,29 @@ export default function VideoPlayer({
                     safePlay(videoRef.current);
                   }
                 }}
-                className="px-5 py-2.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 active:scale-95 text-xs sm:text-sm font-bold text-white shadow-xl transition-all duration-200 flex items-center justify-center gap-2 border border-neutral-700 cursor-pointer"
+                className="px-4 py-2.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 active:scale-95 text-xs sm:text-sm font-semibold text-white shadow-xl transition-all duration-200 flex items-center justify-center gap-2 border border-neutral-700 cursor-pointer"
               >
-                إعادة المحاولة المباشرة
+                إعادة المحاولة
               </button>
+              {activeServer?.url && (
+                <a
+                  href={activeServer.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-4 py-2.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 active:scale-95 text-xs sm:text-sm font-semibold text-white border border-neutral-700 transition flex items-center gap-2 cursor-pointer"
+                >
+                  <Download className="w-4 h-4 text-emerald-400" />
+                  <span>تحميل مباشر</span>
+                </a>
+              )}
               {servers.length > 1 && (
                 <button
                   type="button"
                   onClick={() => switchServer((selectedServerIndex + 1) % servers.length)}
-                  className="px-4 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 active:scale-95 text-xs font-semibold text-white border border-red-500/80 transition flex items-center gap-2 cursor-pointer"
+                  className="px-4 py-2.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 active:scale-95 text-xs font-semibold text-neutral-200 border border-neutral-700 transition flex items-center gap-2 cursor-pointer"
                 >
                   <Tv className="w-3.5 h-3.5" />
-                  تجربة سيرفر آخر
+                  <span>تجربة سيرفر آخر</span>
                 </button>
               )}
               <button
@@ -535,7 +723,7 @@ export default function VideoPlayer({
                 onClick={() => setProxyOverride(!useProxy)}
                 className="px-3.5 py-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 text-[11px] font-medium text-neutral-400 hover:text-neutral-200 border border-neutral-800 transition cursor-pointer"
               >
-                {useProxy ? 'العودة للتشغيل المباشر' : 'تجربة وسيط البث (Proxy)'}
+                {useProxy ? 'التبديل للبث المباشر (Direct CDN)' : 'تجربة وسيط البث (Proxy Mode)'}
               </button>
             </div>
           </div>
@@ -578,15 +766,15 @@ export default function VideoPlayer({
           </button>
         )}
 
-        {/* Custom Video Controls Bar */}
+        {/* Video Controls Bar */}
         <div
-          className={`absolute bottom-0 inset-x-0 p-4 bg-gradient-to-t from-black/95 via-black/70 to-transparent transition-opacity duration-300 ${
+          className={`absolute bottom-0 inset-x-0 p-3 sm:p-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] px-[max(0.75rem,env(safe-area-inset-left))] bg-gradient-to-t from-black/95 via-black/75 to-transparent transition-opacity duration-300 ${
             showControls || !isPlaying ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'
           }`}
           dir="ltr"
         >
-          {/* Progress Timeline with HTTP Range Seeking */}
-          <div className="relative w-full flex items-center group/timeline mb-3">
+          {/* Progress Timeline with HTTP Range Seeking - Enhanced Touch Target */}
+          <div className="relative w-full flex items-center group/timeline mb-2 sm:mb-3 py-1 cursor-pointer">
             <div
               className="absolute left-0 h-1.5 rounded-full bg-neutral-700/80 pointer-events-none"
               style={{ width: `${buffered}%` }}
@@ -601,18 +789,20 @@ export default function VideoPlayer({
               max={duration || 100}
               value={currentTime}
               onChange={handleSeek}
-              className="w-full h-1.5 appearance-none bg-neutral-800 rounded-full cursor-pointer accent-red-600 opacity-90 hover:opacity-100 transition"
+              className="w-full h-4 sm:h-1.5 appearance-none bg-transparent rounded-full cursor-pointer accent-red-600 opacity-90 hover:opacity-100 transition"
+              aria-label="شريط التقدم"
             />
           </div>
 
           {/* Controls Bottom Row */}
-          <div className="flex items-center justify-between gap-2 text-white">
+          <div className="flex items-center justify-between gap-1 sm:gap-2 text-white">
             {/* Left Controls: Play, Volume, Time */}
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1 sm:gap-2">
               <button
                 type="button"
                 onClick={togglePlay}
-                className="p-1.5 rounded-lg hover:bg-neutral-800/80 text-white transition"
+                className="min-w-[44px] min-h-[44px] flex items-center justify-center p-2 rounded-xl hover:bg-neutral-800/80 text-white transition active:scale-90 cursor-pointer"
+                aria-label={isPlaying ? 'إيقاف مؤقت' : 'تشغيل'}
               >
                 {isPlaying ? <Pause className="w-5 h-5 fill-white" /> : <Play className="w-5 h-5 fill-white" />}
               </button>
@@ -622,8 +812,9 @@ export default function VideoPlayer({
                 onClick={() => {
                   if (videoRef.current) videoRef.current.currentTime -= 10;
                 }}
-                className="p-1.5 rounded-lg hover:bg-neutral-800/80 text-neutral-300 hover:text-white transition"
+                className="hidden sm:flex min-w-[40px] min-h-[40px] items-center justify-center p-1.5 rounded-lg hover:bg-neutral-800/80 text-neutral-300 hover:text-white transition active:scale-90 cursor-pointer"
                 title="إرجاع 10 ثواني"
+                aria-label="إرجاع 10 ثواني"
               >
                 <RotateCcw className="w-4 h-4" />
               </button>
@@ -633,18 +824,20 @@ export default function VideoPlayer({
                 onClick={() => {
                   if (videoRef.current) videoRef.current.currentTime += 10;
                 }}
-                className="p-1.5 rounded-lg hover:bg-neutral-800/80 text-neutral-300 hover:text-white transition"
+                className="hidden sm:flex min-w-[40px] min-h-[40px] items-center justify-center p-1.5 rounded-lg hover:bg-neutral-800/80 text-neutral-300 hover:text-white transition active:scale-90 cursor-pointer"
                 title="تقديم 10 ثواني"
+                aria-label="تقديم 10 ثواني"
               >
                 <RotateCw className="w-4 h-4" />
               </button>
 
               {/* Volume & Unmute */}
-              <div className="flex items-center gap-1.5 group/volume">
+              <div className="flex items-center gap-1 group/volume">
                 <button
                   type="button"
                   onClick={toggleMute}
-                  className="p-1.5 rounded-lg hover:bg-neutral-800/80 text-white transition"
+                  className="min-w-[44px] min-h-[44px] flex items-center justify-center p-2 rounded-xl hover:bg-neutral-800/80 text-white transition cursor-pointer"
+                  aria-label={isMuted || volume === 0 ? 'إلغاء كتم الصوت' : 'كتم الصوت'}
                 >
                   {isMuted || volume === 0 ? (
                     <VolumeX className="w-5 h-5 text-red-500" />
@@ -659,12 +852,13 @@ export default function VideoPlayer({
                   step={0.05}
                   value={isMuted ? 0 : volume}
                   onChange={handleVolumeChange}
-                  className="w-16 h-1 appearance-none bg-neutral-700 rounded-full cursor-pointer accent-red-600 hidden sm:block"
+                  className="w-16 h-1 appearance-none bg-neutral-700 rounded-full cursor-pointer accent-red-600 hidden md:block"
+                  aria-label="مستوى الصوت"
                 />
               </div>
 
               {/* Timestamp */}
-              <div className="text-xs text-neutral-300 font-mono tracking-wider">
+              <div className="text-[11px] sm:text-xs text-neutral-300 font-mono tracking-wider whitespace-nowrap pl-1">
                 <span>{formatTime(currentTime)}</span>
                 <span className="text-neutral-500 mx-1">/</span>
                 <span className="text-neutral-400">{formatTime(duration)}</span>
@@ -672,17 +866,17 @@ export default function VideoPlayer({
             </div>
 
             {/* Right Controls: Quality, Speed, Theater, Fullscreen */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 sm:gap-2">
               {/* Dynamic Quality Selector */}
               {servers && servers.length > 0 && (
-                <div className="flex items-center gap-1.5 bg-neutral-900/90 hover:bg-neutral-800/90 border border-neutral-700/80 hover:border-neutral-500 rounded-xl px-2.5 py-1 transition shadow-sm">
+                <div className="flex items-center gap-1 bg-neutral-900/90 hover:bg-neutral-800/90 border border-neutral-700/80 hover:border-neutral-500 rounded-xl px-2 py-1 min-h-[38px] transition shadow-sm">
                   <SlidersHorizontal className="w-3.5 h-3.5 text-red-500 shrink-0" />
                   <label htmlFor="qualitySelect" className="sr-only">اختر الجودة</label>
                   <select
                     id="qualitySelect"
                     value={selectedServerIndex}
                     onChange={(e) => changeQuality(parseInt(e.target.value))}
-                    className="bg-transparent text-white text-xs font-bold font-mono focus:outline-none cursor-pointer pr-1"
+                    className="bg-transparent text-white text-[11px] sm:text-xs font-bold font-mono focus:outline-none cursor-pointer pr-1"
                     title="تغيير جودة الفيديو بسلاسة مع حفظ وقت المشاهدة"
                     dir="rtl"
                   >
@@ -700,15 +894,16 @@ export default function VideoPlayer({
                 <button
                   type="button"
                   onClick={() => setShowSettingsMenu(!showSettingsMenu)}
-                  className="p-1.5 rounded-lg hover:bg-neutral-800/80 text-neutral-300 hover:text-white transition"
+                  className="min-w-[44px] min-h-[44px] flex items-center justify-center p-2 rounded-xl hover:bg-neutral-800/80 text-neutral-300 hover:text-white transition active:scale-90 cursor-pointer"
                   title="الإعدادات والجودة"
+                  aria-label="الإعدادات والجودة"
                 >
                   <Settings className="w-5 h-5" />
                 </button>
 
                 {showSettingsMenu && (
                   <div
-                    className="absolute bottom-10 right-0 w-52 bg-neutral-900/98 backdrop-blur-xl border border-neutral-800 rounded-2xl p-2 shadow-2xl z-40 text-xs"
+                    className="absolute bottom-12 right-0 w-56 bg-neutral-900/98 backdrop-blur-xl border border-neutral-800 rounded-2xl p-2.5 shadow-2xl z-40 text-xs"
                     dir="rtl"
                   >
                     <div className="p-2 border-b border-neutral-800 font-semibold text-neutral-300">
@@ -717,14 +912,14 @@ export default function VideoPlayer({
 
                     {/* Speed options */}
                     <div className="p-2 border-b border-neutral-800">
-                      <span className="text-neutral-400 block mb-1 text-[11px]">سرعة التشغيل</span>
-                      <div className="grid grid-cols-4 gap-1 text-center font-mono">
+                      <span className="text-neutral-400 block mb-1.5 text-[11px]">سرعة التشغيل</span>
+                      <div className="grid grid-cols-4 gap-1.5 text-center font-mono">
                         {[0.75, 1, 1.25, 1.5].map((speed) => (
                           <button
                             key={speed}
                             type="button"
                             onClick={() => changePlaybackSpeed(speed)}
-                            className={`py-1 rounded-md text-[11px] font-bold ${
+                            className={`py-2 rounded-lg text-xs font-bold transition active:scale-90 cursor-pointer ${
                               playbackSpeed === speed
                                 ? 'bg-red-600 text-white'
                                 : 'bg-neutral-800 text-neutral-400 hover:text-white'
@@ -740,7 +935,7 @@ export default function VideoPlayer({
                     <button
                       type="button"
                       onClick={() => setProxyOverride(!useProxy)}
-                      className="w-full flex items-center justify-between p-2 rounded-xl text-neutral-300 hover:bg-neutral-800 text-right mt-1 transition"
+                      className="w-full flex items-center justify-between p-2.5 rounded-xl text-neutral-300 hover:bg-neutral-800 text-right mt-1 transition cursor-pointer"
                     >
                       <div className="flex flex-col text-right">
                         <span>وسيط البث (Proxy)</span>
@@ -756,6 +951,28 @@ export default function VideoPlayer({
                         </span>
                       )}
                     </button>
+
+                    {/* Fullscreen Toggle in Settings */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowSettingsMenu(false);
+                        toggleFullscreen();
+                      }}
+                      className="w-full flex items-center justify-between p-2.5 rounded-xl text-neutral-300 hover:bg-neutral-800 text-right mt-1 transition cursor-pointer"
+                    >
+                      <div className="flex items-center gap-2 text-right">
+                        {isFull ? (
+                          <Minimize className="w-3.5 h-3.5 text-red-500" />
+                        ) : (
+                          <Maximize className="w-3.5 h-3.5 text-neutral-400" />
+                        )}
+                        <span>{isFull ? 'خروج من ملء الشاشة' : 'وضع ملء الشاشة'}</span>
+                      </div>
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-400 font-mono">
+                        F
+                      </span>
+                    </button>
                   </div>
                 )}
               </div>
@@ -764,8 +981,9 @@ export default function VideoPlayer({
               <button
                 type="button"
                 onClick={() => setIsTheaterMode(!isTheaterMode)}
-                className="hidden md:block p-1.5 rounded-lg hover:bg-neutral-800/80 text-neutral-300 hover:text-white transition"
+                className="hidden md:flex min-w-[44px] min-h-[44px] items-center justify-center p-2 rounded-xl hover:bg-neutral-800/80 text-neutral-300 hover:text-white transition cursor-pointer"
                 title="نمط المسرح"
+                aria-label="نمط المسرح"
               >
                 <Tv className="w-4 h-4" />
               </button>
@@ -774,10 +992,15 @@ export default function VideoPlayer({
               <button
                 type="button"
                 onClick={toggleFullscreen}
-                className="p-1.5 rounded-lg hover:bg-neutral-800/80 text-white transition"
-                title="ملء الشاشة"
+                className={`min-w-[44px] min-h-[44px] rounded-xl transition cursor-pointer flex items-center justify-center active:scale-90 ${
+                  isFull
+                    ? 'bg-red-600/30 text-red-400 hover:bg-red-600/40 border border-red-500/50'
+                    : 'hover:bg-neutral-800/80 text-white'
+                }`}
+                title={isFull ? 'الخروج من ملء الشاشة (Esc أو F)' : 'ملء الشاشة (F)'}
+                aria-label={isFull ? 'خروج من ملء الشاشة' : 'ملء الشاشة'}
               >
-                {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
+                {isFull ? <Minimize className="w-5 h-5 text-red-400" /> : <Maximize className="w-5 h-5" />}
               </button>
             </div>
           </div>
@@ -785,7 +1008,7 @@ export default function VideoPlayer({
       </div>
 
       {/* Server & Quality Selection Bar Below Video */}
-      <div className="bg-neutral-900/90 border border-neutral-800 rounded-2xl p-4 space-y-3" dir="rtl">
+      <div className="bg-neutral-900/90 border border-neutral-800 rounded-2xl p-3.5 sm:p-4 space-y-3" dir="rtl">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div className="flex items-center gap-2 text-sm font-bold text-white">
             <Radio className="w-4 h-4 text-red-500 animate-pulse" />
@@ -796,7 +1019,7 @@ export default function VideoPlayer({
           </span>
         </div>
 
-        <div className="flex flex-wrap gap-2.5">
+        <div className="flex flex-wrap gap-2 sm:gap-2.5">
           {servers.map((srv, idx) => {
             const isSelected = selectedServerIndex === idx;
             const isMkv = srv.url.toLowerCase().includes('.mkv') || srv.type === 'mkv';
@@ -805,7 +1028,7 @@ export default function VideoPlayer({
                 key={idx}
                 type="button"
                 onClick={() => switchServer(idx)}
-                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold transition border ${
+                className={`flex items-center gap-2 px-3.5 sm:px-4 py-2.5 min-h-[44px] rounded-xl text-xs font-semibold transition border cursor-pointer active:scale-95 ${
                   isSelected
                     ? 'bg-red-600 border-red-500 text-white shadow-lg shadow-red-900/30 scale-[1.02]'
                     : 'bg-neutral-800/80 border-neutral-700/60 text-neutral-300 hover:bg-neutral-800 hover:text-white hover:border-neutral-600'

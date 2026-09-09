@@ -50,7 +50,7 @@ export default function HomePage() {
     <div className="w-full space-y-12 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto pt-6" dir="rtl">
       {/* 1. Hero Carousel Slider */}
       {loading ? (
-        <div className="w-full h-[520px] rounded-3xl bg-neutral-900 animate-pulse border border-neutral-800"></div>
+        <div className="w-full h-[480px] sm:h-[580px] lg:h-[640px] rounded-2xl sm:rounded-3xl bg-neutral-900 animate-pulse border border-neutral-800"></div>
       ) : (
         <HeroSlider items={featured} />
       )}
@@ -71,13 +71,13 @@ export default function HomePage() {
           </Link>
         </div>
 
-        <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
+        <div className="flex items-center gap-2 overflow-x-auto pb-2 [scrollbar-width:none] [-webkit-overflow-scrolling:touch]">
           {CATEGORIES.map((cat) => (
             <Link
               key={cat.id}
               href={cat.id === 'all' ? '/catalog' : `/catalog?category=${cat.id}`}
               id={`quick-chip-${cat.id}`}
-              className="flex-shrink-0 px-4 py-2 rounded-xl text-xs font-semibold bg-neutral-900/80 hover:bg-neutral-800 text-neutral-300 hover:text-white border border-neutral-800 transition active:scale-95"
+              className="flex-shrink-0 px-4 py-2.5 min-h-[44px] flex items-center justify-center rounded-xl text-xs font-semibold bg-neutral-900/80 hover:bg-neutral-800 text-neutral-300 hover:text-white border border-neutral-800 transition active:scale-95 cursor-pointer"
             >
               {cat.label}
             </Link>
@@ -108,13 +108,13 @@ export default function HomePage() {
         </div>
 
         {loading ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
             {[...Array(5)].map((_, i) => (
               <div key={i} className="aspect-[2/3] bg-neutral-900 rounded-2xl animate-pulse" />
             ))}
           </div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
             {latestMovies.slice(0, 5).map((item) => (
               <MediaCard key={item.id} item={item} />
             ))}
@@ -145,13 +145,13 @@ export default function HomePage() {
         </div>
 
         {loading ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
             {[...Array(5)].map((_, i) => (
               <div key={i} className="aspect-[2/3] bg-neutral-900 rounded-2xl animate-pulse" />
             ))}
           </div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
             {latestSeries.slice(0, 5).map((item) => (
               <MediaCard key={item.id} item={item} />
             ))}
@@ -182,13 +182,13 @@ export default function HomePage() {
         </div>
 
         {loading ? (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
             {[...Array(5)].map((_, i) => (
               <div key={i} className="aspect-[2/3] bg-neutral-900 rounded-2xl animate-pulse" />
             ))}
           </div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
             {trending.slice(0, 5).map((item) => (
               <MediaCard key={item.id} item={item} />
             ))}

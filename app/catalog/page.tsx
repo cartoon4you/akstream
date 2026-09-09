@@ -87,13 +87,13 @@ function CatalogContent() {
   return (
     <div className="w-full space-y-8 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto pt-6" dir="rtl">
       {/* Category Header Banner */}
-      <div className="bg-gradient-to-r from-neutral-900 via-neutral-900/90 to-neutral-950 border border-neutral-800/90 rounded-3xl p-6 sm:p-8 relative overflow-hidden shadow-xl">
+      <div className="bg-gradient-to-r from-neutral-900 via-neutral-900/90 to-neutral-950 border border-neutral-800/90 rounded-2xl sm:rounded-3xl p-4 sm:p-8 relative overflow-hidden shadow-xl">
         <div className="relative z-10 space-y-2 max-w-2xl">
           <div className="flex items-center gap-2 text-xs font-bold text-red-500 font-mono">
             <LayoutGrid className="w-4 h-4" />
             <span>تصفح الكتالوج وفلترة الأقسام</span>
           </div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-white">
+          <h1 className="text-xl sm:text-3xl font-extrabold text-white">
             {getActiveCategoryTitle()}
           </h1>
           <p className="text-xs sm:text-sm text-neutral-400">
@@ -103,7 +103,7 @@ function CatalogContent() {
       </div>
 
       {/* Categories Filter Tabs (Desktop & Mobile Scroll) */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none">
+      <div className="flex items-center gap-2 overflow-x-auto pb-2 [scrollbar-width:none] [-webkit-overflow-scrolling:touch]">
         {CATEGORIES.map((cat) => {
           const isSelected = activeCategory === cat.id;
           return (
@@ -112,7 +112,7 @@ function CatalogContent() {
               type="button"
               id={`cat-filter-${cat.id}`}
               onClick={() => updateFilters({ category: cat.id })}
-              className={`flex-shrink-0 px-4 py-2.5 rounded-xl text-xs font-semibold transition border active:scale-95 ${
+              className={`flex-shrink-0 px-4 py-2.5 min-h-[44px] flex items-center justify-center rounded-xl text-xs font-semibold transition border cursor-pointer active:scale-95 ${
                 isSelected
                   ? 'bg-red-600 border-red-500 text-white shadow-lg shadow-red-950/40'
                   : 'bg-neutral-900/80 border-neutral-800 text-neutral-300 hover:text-white hover:bg-neutral-800'
@@ -125,10 +125,10 @@ function CatalogContent() {
       </div>
 
       {/* Sub-Filters: Type (Movies / Series) and Sort */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-neutral-900/60 p-4 rounded-2xl border border-neutral-800/80">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4 bg-neutral-900/60 p-3.5 sm:p-4 rounded-2xl border border-neutral-800/80">
         {/* Type Filter */}
-        <div className="flex items-center gap-1.5">
-          <span className="text-xs text-neutral-400 ml-2">النوع:</span>
+        <div className="flex items-center flex-wrap gap-1.5">
+          <span className="text-xs text-neutral-400 ml-1 sm:ml-2">النوع:</span>
           {[
             { id: 'all', label: 'الكل' },
             { id: 'movie', label: 'أفلام فقط' },
@@ -139,10 +139,10 @@ function CatalogContent() {
               type="button"
               id={`type-filter-${t.id}`}
               onClick={() => updateFilters({ type: t.id })}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+              className={`px-3 py-2 min-h-[40px] flex items-center justify-center rounded-xl text-xs font-medium transition cursor-pointer active:scale-95 ${
                 activeType === t.id
                   ? 'bg-neutral-800 text-white font-bold border border-neutral-700'
-                  : 'text-neutral-400 hover:text-white'
+                  : 'text-neutral-400 hover:text-white bg-neutral-900/40'
               }`}
             >
               {t.label}
@@ -152,12 +152,12 @@ function CatalogContent() {
 
         {/* Sort Filter */}
         <div className="flex items-center gap-2">
-          <ArrowUpDown className="w-3.5 h-3.5 text-neutral-500" />
-          <span className="text-xs text-neutral-400">الترتيب:</span>
+          <ArrowUpDown className="w-3.5 h-3.5 text-neutral-500 shrink-0" />
+          <span className="text-xs text-neutral-400 shrink-0">الترتيب:</span>
           <select
             value={activeSort}
             onChange={(e) => updateFilters({ sort: e.target.value })}
-            className="bg-neutral-950 text-xs text-neutral-200 border border-neutral-800 rounded-xl px-3 py-1.5 focus:outline-none focus:border-red-600"
+            className="w-full sm:w-auto bg-neutral-950 text-xs text-neutral-200 border border-neutral-800 rounded-xl px-3 py-2 min-h-[40px] focus:outline-none focus:border-red-600 cursor-pointer"
           >
             <option value="latest">الأحدث إضافة</option>
             <option value="rating">الأعلى تقييماً (IMDb)</option>
@@ -168,24 +168,24 @@ function CatalogContent() {
 
       {/* Items Grid */}
       {loading ? (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 sm:gap-4">
           {[...Array(12)].map((_, i) => (
             <div key={i} className="aspect-[2/3] bg-neutral-900 rounded-2xl animate-pulse" />
           ))}
         </div>
       ) : items.length > 0 ? (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 sm:gap-4">
           {items.map((item) => (
             <MediaCard key={item.id} item={item} />
           ))}
         </div>
       ) : (
-        <div className="p-16 text-center bg-neutral-900/40 rounded-3xl border border-neutral-800/60 space-y-3">
+        <div className="p-10 sm:p-16 text-center bg-neutral-900/40 rounded-3xl border border-neutral-800/60 space-y-3">
           <p className="text-neutral-400 text-sm">لم يتم العثور على أي أعمال في هذا التصنيف حالياً.</p>
           <button
             type="button"
             onClick={() => updateFilters({ category: 'all', type: 'all' })}
-            className="px-4 py-2 rounded-xl bg-red-600 text-white text-xs font-semibold"
+            className="px-5 py-2.5 min-h-[44px] rounded-xl bg-red-600 text-white text-xs font-semibold cursor-pointer active:scale-95"
           >
             إعادة تعيين الفلاتر
           </button>

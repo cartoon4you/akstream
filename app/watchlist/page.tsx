@@ -81,13 +81,13 @@ export default function WatchlistPage() {
 
       {/* Watchlist Items Grid */}
       {loading || !mounted ? (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 sm:gap-4">
           {[...Array(6)].map((_, i) => (
             <div key={i} className="aspect-[2/3] bg-neutral-900 rounded-2xl animate-pulse" />
           ))}
         </div>
       ) : watchlist.length > 0 ? (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 sm:gap-4">
           {watchlist.map((item) => (
             <div
               key={item.id}
@@ -111,14 +111,14 @@ export default function WatchlistPage() {
                   </span>
                 )}
 
-                {/* Remove from Watchlist Button */}
+                {/* Remove from Watchlist Button with Touch Target */}
                 <button
                   type="button"
                   onClick={() => removeFromWatchlist(item.id)}
                   title="حذف من قائمتي"
-                  className="absolute top-2.5 left-2.5 p-1.5 rounded-xl bg-black/70 hover:bg-red-600 text-neutral-300 hover:text-white border border-neutral-700 transition"
+                  className="absolute top-2.5 left-2.5 min-w-[40px] min-h-[40px] flex items-center justify-center p-1.5 rounded-xl bg-black/70 hover:bg-red-600 text-neutral-300 hover:text-white border border-neutral-700 transition cursor-pointer active:scale-90"
                 >
-                  <Trash2 className="w-3.5 h-3.5" />
+                  <Trash2 className="w-4 h-4" />
                 </button>
 
                 {/* Play Button Overlay */}
@@ -132,15 +132,15 @@ export default function WatchlistPage() {
                 </Link>
               </div>
 
-              <div className="p-3 flex flex-col justify-between flex-1 gap-1">
+              <div className="p-2.5 sm:p-3 flex flex-col justify-between flex-1 gap-1">
                 <Link
                   href={`/watch?id=${encodeURIComponent(item.id)}`}
-                  className="text-xs font-bold text-neutral-100 hover:text-red-500 line-clamp-1 transition"
+                  className="text-xs sm:text-sm font-bold text-neutral-100 hover:text-red-500 line-clamp-1 transition"
                 >
                   {item.title}
                 </Link>
 
-                <div className="flex items-center justify-between text-[11px] text-neutral-400 pt-1 border-t border-neutral-800">
+                <div className="flex items-center justify-between text-[10px] sm:text-[11px] text-neutral-400 pt-1 border-t border-neutral-800">
                   <span>{item.year || '2024'}</span>
                   <Link
                     href={`/watch?id=${encodeURIComponent(item.id)}`}
@@ -154,7 +154,7 @@ export default function WatchlistPage() {
           ))}
         </div>
       ) : (
-        <div className="p-16 text-center bg-neutral-900/40 rounded-3xl border border-neutral-800/60 space-y-4">
+        <div className="p-8 sm:p-16 text-center bg-neutral-900/40 rounded-3xl border border-neutral-800/60 space-y-4">
           <Bookmark className="w-12 h-12 text-neutral-600 mx-auto" />
           <h3 className="text-base font-bold text-neutral-200">قائمة المشاهدة فارغة حالياً</h3>
           <p className="text-xs text-neutral-400 max-w-sm mx-auto">

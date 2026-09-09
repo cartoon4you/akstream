@@ -13,6 +13,7 @@ interface HeroSliderProps {
 export default function HeroSlider({ items }: HeroSliderProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
+  const [touchStartX, setTouchStartX] = useState<number | null>(null);
   const { isInWatchlist, addToWatchlist, removeFromWatchlist } = useWatchlist();
 
   const slides = items && items.length > 0 ? items : [];
@@ -39,6 +40,31 @@ export default function HeroSlider({ items }: HeroSliderProps) {
     setCurrentIndex((prev) => (prev + 1) % slides.length);
   };
 
+  // Mobile Touch Swipe Handling
+  const handleTouchStart = (e: React.TouchEvent) => {
+    setTouchStartX(e.touches[0].clientX);
+    setIsPaused(true);
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartX === null) return;
+    const touchEndX = e.changedTouches[0].clientX;
+    const diffX = touchStartX - touchEndX;
+
+    // Minimum swipe threshold of 45px
+    if (Math.abs(diffX) > 45) {
+      if (diffX > 0) {
+        // Swiped left (in RTL: goes to next or prev)
+        nextSlide();
+      } else {
+        // Swiped right
+        prevSlide();
+      }
+    }
+    setTouchStartX(null);
+    setIsPaused(false);
+  };
+
   const handleWatchlistToggle = () => {
     if (saved) {
       removeFromWatchlist(current.id);
@@ -52,7 +78,9 @@ export default function HeroSlider({ items }: HeroSliderProps) {
       id="hero-carousel-container"
       onMouseEnter={() => setIsPaused(true)}
       onMouseLeave={() => setIsPaused(false)}
-      className="relative w-full h-[520px] sm:h-[580px] lg:h-[640px] rounded-3xl overflow-hidden bg-neutral-950 border border-neutral-800/80 shadow-2xl select-none"
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+      className="relative w-full h-[480px] sm:h-[580px] lg:h-[640px] rounded-2xl sm:rounded-3xl overflow-hidden bg-neutral-950 border border-neutral-800/80 shadow-2xl select-none"
       dir="rtl"
     >
       {/* Background Backdrop Image with smooth fade */}
@@ -69,11 +97,11 @@ export default function HeroSlider({ items }: HeroSliderProps) {
       </div>
 
       {/* Content Container */}
-      <div className="relative z-10 h-full max-w-7xl mx-auto px-6 sm:px-12 flex flex-col justify-end pb-16 pt-24">
-        <div className="max-w-2xl space-y-4">
+      <div className="relative z-10 h-full max-w-7xl mx-auto px-4 sm:px-12 flex flex-col justify-end pb-16 sm:pb-16 pt-16 sm:pt-24">
+        <div className="max-w-2xl space-y-3 sm:space-y-4">
           {/* Top Badges */}
-          <div className="flex items-center flex-wrap gap-2.5">
-            <span className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-600/90 text-white text-xs font-bold shadow-lg shadow-red-900/40">
+          <div className="flex items-center flex-wrap gap-2">
+            <span className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1 rounded-full bg-red-600/90 text-white text-[11px] sm:text-xs font-bold shadow-lg shadow-red-900/40">
               <Sparkles className="w-3.5 h-3.5" />
               أحدث العروض الحصرية
             </span>
@@ -85,29 +113,29 @@ export default function HeroSlider({ items }: HeroSliderProps) {
               </span>
             )}
 
-            <span className="px-2.5 py-1 rounded-full bg-neutral-900/80 backdrop-blur-md border border-neutral-700 text-xs text-neutral-300 font-mono">
+            <span className="px-2 py-1 rounded-full bg-neutral-900/80 backdrop-blur-md border border-neutral-700 text-xs text-neutral-300 font-mono">
               {current.year}
             </span>
 
             {current.duration && (
-              <span className="px-2.5 py-1 rounded-full bg-neutral-900/80 backdrop-blur-md border border-neutral-700 text-xs text-neutral-300">
+              <span className="px-2 py-1 rounded-full bg-neutral-900/80 backdrop-blur-md border border-neutral-700 text-xs text-neutral-300">
                 {current.duration}
               </span>
             )}
           </div>
 
           {/* Title */}
-          <h1 className="text-3xl sm:text-4xl lg:text-5xl font-black text-white leading-tight tracking-tight drop-shadow-md">
+          <h1 className="text-2xl sm:text-4xl lg:text-5xl font-black text-white leading-tight tracking-tight drop-shadow-md line-clamp-2">
             {current.title}
           </h1>
 
           {/* Genres Chips */}
           {current.genres && current.genres.length > 0 && (
             <div className="flex flex-wrap gap-1.5">
-              {current.genres.map((g, idx) => (
+              {current.genres.slice(0, 4).map((g, idx) => (
                 <span
                   key={idx}
-                  className="px-2.5 py-0.5 rounded-lg bg-neutral-800/80 text-xs text-neutral-300 border border-neutral-700/50"
+                  className="px-2 sm:px-2.5 py-0.5 rounded-lg bg-neutral-800/80 text-[11px] sm:text-xs text-neutral-300 border border-neutral-700/50"
                 >
                   {g}
                 </span>
@@ -116,18 +144,18 @@ export default function HeroSlider({ items }: HeroSliderProps) {
           )}
 
           {/* Synopsis */}
-          <p className="text-sm sm:text-base text-neutral-300 leading-relaxed line-clamp-3 max-w-xl drop-shadow">
+          <p className="text-xs sm:text-base text-neutral-300 leading-relaxed line-clamp-2 sm:line-clamp-3 max-w-xl drop-shadow">
             {current.story}
           </p>
 
           {/* Actions: Watch Now & Add to Watchlist */}
-          <div className="pt-2 flex items-center flex-wrap gap-3">
+          <div className="pt-1 sm:pt-2 flex items-center flex-wrap gap-2.5 sm:gap-3">
             <Link
               href={`/watch?id=${encodeURIComponent(current.id)}`}
               id="hero-watch-now-btn"
-              className="flex items-center gap-2.5 px-6 py-3 rounded-xl bg-red-600 hover:bg-red-700 active:scale-95 text-white font-bold text-sm shadow-xl shadow-red-950/40 transition"
+              className="flex items-center justify-center gap-2 px-5 sm:px-6 py-3 min-h-[44px] rounded-xl bg-red-600 hover:bg-red-700 active:scale-95 text-white font-bold text-xs sm:text-sm shadow-xl shadow-red-950/40 transition flex-1 sm:flex-initial"
             >
-              <Play className="w-5 h-5 fill-white translate-x-0.5" />
+              <Play className="w-4 sm:w-5 h-4 sm:h-5 fill-white translate-x-0.5" />
               <span>مشاهدة الآن</span>
             </Link>
 
@@ -135,7 +163,7 @@ export default function HeroSlider({ items }: HeroSliderProps) {
               type="button"
               id="hero-watchlist-btn"
               onClick={handleWatchlistToggle}
-              className={`flex items-center gap-2 px-5 py-3 rounded-xl backdrop-blur-md border font-medium text-sm transition active:scale-95 ${
+              className={`flex items-center justify-center gap-2 px-4 sm:px-5 py-3 min-h-[44px] rounded-xl backdrop-blur-md border font-medium text-xs sm:text-sm transition active:scale-95 ${
                 saved
                   ? 'bg-neutral-800 text-white border-neutral-600'
                   : 'bg-neutral-900/80 hover:bg-neutral-800 text-neutral-200 border-neutral-700/70 hover:text-white'
@@ -158,7 +186,7 @@ export default function HeroSlider({ items }: HeroSliderProps) {
       </div>
 
       {/* Navigation Controls: Arrows & Indicators */}
-      <div className="absolute bottom-6 left-6 sm:left-12 z-20 flex items-center gap-3">
+      <div className="absolute bottom-4 sm:bottom-6 left-4 sm:left-12 z-20 flex items-center gap-2 sm:gap-3">
         {/* Indicators */}
         <div className="flex items-center gap-1.5">
           {slides.map((_, idx) => (
@@ -168,19 +196,19 @@ export default function HeroSlider({ items }: HeroSliderProps) {
               onClick={() => setCurrentIndex(idx)}
               aria-label={`شريحة ${idx + 1}`}
               className={`h-1.5 rounded-full transition-all duration-300 ${
-                currentIndex === idx ? 'w-8 bg-red-600' : 'w-2 bg-neutral-700 hover:bg-neutral-500'
+                currentIndex === idx ? 'w-6 sm:w-8 bg-red-600' : 'w-2 bg-neutral-700 hover:bg-neutral-500'
               }`}
             />
           ))}
         </div>
 
         {/* Previous / Next Arrow Buttons */}
-        <div className="flex items-center gap-1.5 mr-2">
+        <div className="hidden sm:flex items-center gap-1.5 mr-2">
           <button
             type="button"
             onClick={prevSlide}
             aria-label="السابق"
-            className="p-2 rounded-full bg-neutral-900/80 hover:bg-neutral-800 text-white border border-neutral-800 backdrop-blur-md transition active:scale-90"
+            className="p-2 rounded-full bg-neutral-900/80 hover:bg-neutral-800 text-white border border-neutral-800 backdrop-blur-md transition active:scale-90 min-w-[36px] min-h-[36px] flex items-center justify-center"
           >
             <ChevronRight className="w-4 h-4" />
           </button>
@@ -188,7 +216,7 @@ export default function HeroSlider({ items }: HeroSliderProps) {
             type="button"
             onClick={nextSlide}
             aria-label="التالي"
-            className="p-2 rounded-full bg-neutral-900/80 hover:bg-neutral-800 text-white border border-neutral-800 backdrop-blur-md transition active:scale-90"
+            className="p-2 rounded-full bg-neutral-900/80 hover:bg-neutral-800 text-white border border-neutral-800 backdrop-blur-md transition active:scale-90 min-w-[36px] min-h-[36px] flex items-center justify-center"
           >
             <ChevronLeft className="w-4 h-4" />
           </button>

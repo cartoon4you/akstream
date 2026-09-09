@@ -109,6 +109,24 @@ function WatchContent() {
     }
   };
 
+  // Refresh temporary streaming links when expired
+  const handleRefreshCurrentMedia = async () => {
+    const targetId = selectedEpisode?.id || media?.id;
+    if (!targetId) return false;
+    try {
+      const res = await fetch(`/api/details?id=${encodeURIComponent(targetId)}`);
+      const json = await res.json();
+      if (json.success && json.data?.servers && json.data.servers.length > 0) {
+        setActiveServers(json.data.servers);
+        setSelectedEpisode((prev) => (prev ? { ...prev, servers: json.data.servers } : null));
+        return true;
+      }
+    } catch (e) {
+      console.error('Failed to refresh media link:', e);
+    }
+    return false;
+  };
+
   if (loading) {
     return (
       <div className="max-w-6xl mx-auto px-4 pt-8 space-y-6 animate-pulse" dir="rtl">
@@ -149,6 +167,7 @@ function WatchContent() {
           servers={activeServers}
           title={currentPlayingTitle}
           poster={media.banner || media.poster}
+          onRefreshLink={handleRefreshCurrentMedia}
         />
       </section>
 

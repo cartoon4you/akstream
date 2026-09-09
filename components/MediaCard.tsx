@@ -62,15 +62,15 @@ export default function MediaCard({ item }: MediaCardProps) {
           </div>
         </div>
 
-        {/* Watchlist Quick Button */}
+        {/* Watchlist Quick Button with Touch Friendly Sizing */}
         <button
           type="button"
           id={`watchlist-toggle-${item.id}`}
           onClick={handleWatchlistClick}
           aria-label={saved ? 'إزالة من قائمتي' : 'إضافة إلى قائمتي'}
-          className={`absolute bottom-2.5 left-2.5 p-2 rounded-xl backdrop-blur-md border transition-transform active:scale-90 ${
+          className={`absolute bottom-2.5 left-2.5 min-w-[40px] min-h-[40px] flex items-center justify-center p-2 rounded-xl backdrop-blur-md border transition-transform active:scale-90 cursor-pointer ${
             saved
-              ? 'bg-red-600 text-white border-red-500'
+              ? 'bg-red-600 text-white border-red-500 shadow-md shadow-red-950/40'
               : 'bg-black/70 text-neutral-300 hover:text-white border-neutral-700/60 hover:bg-neutral-800'
           }`}
         >
@@ -79,24 +79,24 @@ export default function MediaCard({ item }: MediaCardProps) {
       </Link>
 
       {/* Info Section */}
-      <div className="p-3.5 flex flex-col flex-1 justify-between gap-1.5">
+      <div className="p-2.5 sm:p-3.5 flex flex-col flex-1 justify-between gap-1.5">
         <div>
           <Link
             href={`/watch?id=${encodeURIComponent(item.id)}`}
-            className="block text-sm font-bold text-neutral-100 hover:text-red-500 transition line-clamp-1 leading-snug"
+            className="block text-xs sm:text-sm font-bold text-neutral-100 hover:text-red-500 transition line-clamp-1 leading-snug"
           >
             {item.title}
           </Link>
           {item.originalTitle && (
-            <p className="text-[11px] text-neutral-500 truncate font-mono mt-0.5">
+            <p className="text-[10px] sm:text-[11px] text-neutral-500 truncate font-mono mt-0.5">
               {item.originalTitle}
             </p>
           )}
         </div>
 
-        <div className="flex items-center justify-between text-xs text-neutral-400 pt-1 border-t border-neutral-800/60">
+        <div className="flex items-center justify-between text-[11px] sm:text-xs text-neutral-400 pt-1 border-t border-neutral-800/60">
           <span>{item.year || '2024'}</span>
-          <span className="text-[11px] text-neutral-400 font-medium">
+          <span className="text-[10px] sm:text-[11px] text-neutral-400 font-medium">
             {item.categoryLabel || (item.type === 'series' ? 'مسلسلات' : 'أفلام')}
           </span>
         </div>

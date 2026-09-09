@@ -15,17 +15,30 @@ interface UpstreamResult {
 
 /**
  * Robust Upstream Fetcher (Optimized for Akwam / Downet CDNs)
+ * Features:
+ * - Strict 10s overall deadline (prevents Cloud Run 196s timeout hangs)
+ * - Auto-detects and rejects upstream 4xx/5xx errors or HTML error pages
+ * - Smooth HTTP streaming without buffering
  */
 function fetchUpstream(
   targetUrl: string,
   baseHeaders: Record<string, string>,
-  maxRedirects = 5
+  maxRedirects = 5,
+  startTime = Date.now()
 ): Promise<UpstreamResult> {
+  const MAX_OVERALL_TIMEOUT = 10000; // 10 seconds total across all redirects
+
   return new Promise((resolve, reject) => {
+    if (Date.now() - startTime > MAX_OVERALL_TIMEOUT) {
+      return reject(new Error('انتهت مهلة الاتصال الإجمالية بالسيرفر المصدر (Global Timeout)'));
+    }
+
     try {
       const parsedUrl = new URL(targetUrl);
       const isHttps = parsedUrl.protocol === 'https:';
       const client = isHttps ? https : http;
+
+      const remainingTime = Math.max(2000, MAX_OVERALL_TIMEOUT - (Date.now() - startTime));
 
       // تحديث هيدر Host ليتطابق دائماً مع الخادم الهدف
       const activeHeaders = { 
@@ -38,8 +51,8 @@ function fetchUpstream(
         {
           method: 'GET',
           headers: activeHeaders,
-          rejectUnauthorized: false, // تجاوز مشاكل SSL على الخوادم الفرعية
-          timeout: 35000,
+          rejectUnauthorized: false, // تجاوز مشاكل الشهادات الذاتية على بعض خوادم CDN الفرعية
+          timeout: remainingTime,
         },
         (res) => {
           // التعامل مع إعادة التوجيه (Redirects)
@@ -50,16 +63,26 @@ function fetchUpstream(
             maxRedirects > 0
           ) {
             const redirectUrl = new URL(res.headers.location, targetUrl).toString();
-            
-            // تحرير مقبس الاتصال (Socket) لتجنب تسريب الذاكرة
-            res.resume();
+            res.resume(); // تحرير المقبس لمنع تسريب الذاكرة
 
             const updatedHeaders = { ...baseHeaders };
             updatedHeaders['Referer'] = targetUrl;
 
-            return fetchUpstream(redirectUrl, updatedHeaders, maxRedirects - 1)
+            return fetchUpstream(redirectUrl, updatedHeaders, maxRedirects - 1, startTime)
               .then(resolve)
               .catch(reject);
+          }
+
+          // إذا أرجع السيرفر المصدر خطأ (مثل 403 أو 500 أو صفحة HTML تفيد بانتهاء الرابط)
+          if (res.statusCode && res.statusCode >= 400) {
+            res.resume();
+            return reject(new Error(`السيرفر المصدر أرجع رمز الخطأ (${res.statusCode})`));
+          }
+
+          const cType = (res.headers['content-type'] || '').toLowerCase();
+          if (cType.includes('text/html') || cType.includes('application/json')) {
+            res.resume();
+            return reject(new Error('السيرفر المصدر أرجع صفحة نصية بدلاً من دفق الفيديو'));
           }
 
           resolve({
@@ -71,7 +94,7 @@ function fetchUpstream(
       );
 
       req.on('timeout', () => {
-        req.destroy(new Error('انتهت مهلة جلب الفيديو من السيرفر المصدر (Timeout)'));
+        req.destroy(new Error('انتهت مهلة استجابة السيرفر المصدر (Socket Timeout)'));
       });
 
       req.on('error', (err) => {
@@ -225,16 +248,24 @@ export async function GET(request: NextRequest) {
     });
   } catch (error: any) {
     console.error('Video proxy error:', error?.message || error);
+    const isTimeout =
+      error?.message?.includes('مهلة') ||
+      error?.message?.includes('Timeout') ||
+      error?.name === 'AbortError';
+
     return new Response(
       JSON.stringify({
         success: false,
-        error: 'تعذر دفق الفيديو من السيرفر المصدر (أكوام/داونيت)',
+        error: isTimeout
+          ? 'انتهت مهلة استجابة السيرفر المصدر (داونيت/أكوام)'
+          : 'تعذر دفق الفيديو من السيرفر المصدر',
         details: error?.message || 'Upstream connection failed',
+        timeout: isTimeout,
       }),
       {
-        status: 502,
+        status: isTimeout ? 504 : 502,
         headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': 'application/json; charset=utf-8',
           'Access-Control-Allow-Origin': '*',
         },
       }
